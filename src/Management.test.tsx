@@ -4,8 +4,8 @@ import {PoolDetail,PoolTable,TargetForm,TargetDeleteModal} from './App';
 import {TargetCards} from './TargetCards';
 import type {Pool,Target} from './types';
 
-const pool={id:'pool-1',name:'Germany',hostname:'vpn.example.com',automation_enabled:false,profile_configured:true} as Pool;
-const target={id:'target-1',name:'Germany 01',ip:'1.1.1.1',manual_enabled:true,status:'unknown',last_checked_at:null,last_latency_ms:null} as Target;
+const pool={id:'pool-1',failure_threshold:3,recovery_threshold:5,name:'Germany',hostname:'vpn.example.com',automation_enabled:false,profile_configured:true} as Pool;
+const target={id:'target-1',failures:0,successes:0,name:'Germany 01',ip:'1.1.1.1',manual_enabled:true,status:'unknown',last_checked_at:null,last_latency_ms:null} as Target;
 const noop=()=>{};
 const saved=async()=>{};
 const statusNames={unknown:'Ожидает проверки'} as Record<Target['status'],string>;
@@ -26,7 +26,7 @@ describe('pool deletion and target editing controls',()=>{
  });
  it('blocks mobile changes while an IP replacement is pending',()=>{
   const view=renderToStaticMarkup(<TargetCards pool={pool} targets={[{...target,dns_pending_action:'replace_ip'}]} statusNames={statusNames} busy={new Set()} onAction={noop}/>);
-  const buttons=view.match(/<button\b[^>]*>/g);
+  const buttons=view.match(/<footer>([\s\S]*?)<\/footer>/)![1].match(/<button\b[^>]*>/g);
   expect(buttons).toHaveLength(3);
   expect(buttons!.every(button=>button.includes('disabled'))).toBe(true);
  });
