@@ -7,7 +7,7 @@ const pool={id:'pool-1',automation_enabled:false,profile_configured:false} as Po
 const target={id:'target-1',name:'Server',ip:'1.1.1.1',manual_enabled:true,status:'unknown',last_checked_at:null,last_latency_ms:null} as Target;
 const noop=()=>{};
 function render(overrides:Partial<Pool>={},targets=[target],busy=new Set<string>(),targetsLoading=false){
- return renderToStaticMarkup(<PoolDetail pool={{...pool,...overrides}} targets={targets} targetsLoading={targetsLoading} busy={busy} onEdit={noop} onProfile={noop} onAdd={noop} onImport={noop} onToggle={noop} onSync={noop} onCheck={noop} onTargetAction={noop}/>);
+ return renderToStaticMarkup(<PoolDetail pool={{...pool,...overrides}} targets={targets} targetsLoading={targetsLoading} busy={busy} onEdit={noop} onDelete={noop} onProfile={noop} onAdd={noop} onImport={noop} onToggle={noop} onSync={noop} onCheck={noop} onTargetAction={noop}/>);
 }
 function checkButton(view:string){
  const button=view.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find(button=>button.includes('Проверить сейчас'));
