@@ -8,4 +8,4 @@ export interface GuardEvent {id:string;created_at:string;level:'info'|'warning'|
 export interface Zone {id:string;name:string}
 export interface Node {uuid:string;name:string;address:string;is_connected:boolean;config_profile_uuid?:string}
 export interface Host {uuid:string;remark:string;address:string;port:number;node_uuids:string[]}
-export interface ProbeProfile {port:number;uuid:string;transport:'tcp'|'xhttp';security:'reality'|'tls';server_name:string;public_key:string;short_id:string;flow:string;fingerprint:string;path:string;host:string;xhttp_mode:string;xhttp_extra?:Record<string,unknown>}
+export interface ProbeProfile {port:number;uuid:string;transport:'tcp'|'xhttp';security:'reality'|'tls';server_name:string;public_key:string;short_id:string;flow:string;fingerprint:string;path:string;host:string;xhttp_mode:string;xhttp_extra?:Record<string,unknown>;alpn?:string[]}
