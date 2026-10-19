@@ -1,4 +1,5 @@
 import type {ProbeProfile} from './types';
+import {parseXHTTPExtra,validateXHTTPExtra} from './xhttpExtra';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const blankProfile=():ProbeProfile=>({port:443,uuid:'',transport:'tcp',security:'reality',server_name:'',public_key:'',short_id:'',flow:'',fingerprint:'chrome',path:'/',host:'',xhttp_mode:'auto'});
 export function validateProfile(p:ProbeProfile):ProbeProfile {
@@ -14,6 +15,7 @@ export function validateProfile(p:ProbeProfile):ProbeProfile {
  if(!['chrome','firefox','safari','ios','android','edge','360','qq','random','randomized'].includes(p.fingerprint)) throw new Error('Неподдерживаемый fingerprint. Выберите поддерживаемый вариант.');
  if(!['auto','packet-up','stream-up','stream-one'].includes(p.xhttp_mode)) throw new Error('Неподдерживаемый режим XHTTP.');
  if(p.transport==='xhttp'&&!p.path.startsWith('/')) throw new Error('Путь XHTTP должен начинаться с /.');
+ if(p.xhttp_extra!==undefined)validateXHTTPExtra(p.xhttp_extra,p.transport,p.xhttp_mode);
  return p;
 }
 export function parseVless(value:string):ProbeProfile {
@@ -22,17 +24,18 @@ export function parseVless(value:string):ProbeProfile {
  if(uri.protocol!=='vless:') throw new Error('Поддерживаются только ссылки vless://.');
  if(uri.password) throw new Error('VLESS не поддерживает пароль в ссылке.');
  const q=uri.searchParams;
- for(const key of ['security','type','sni','serverName','pbk','sid','flow','fp','path','host','mode','encryption']) if(q.getAll(key).length>1) throw new Error(`Параметр ${key} указан несколько раз.`);
+ for(const key of ['security','type','sni','serverName','pbk','sid','flow','fp','path','host','mode','encryption','extra']) if(q.getAll(key).length>1) throw new Error(`Параметр ${key} указан несколько раз.`);
  const transport=q.get('type')||'tcp';
  if(!['tcp','raw','xhttp'].includes(transport)) throw new Error(`Транспорт «${transport}» не поддерживается. Используйте TCP / RAW или XHTTP.`);
  const security=q.get('security')||'';
  if(!['reality','tls'].includes(security)) throw new Error('В ссылке должен быть security=reality или security=tls.');
  if(q.get('encryption')&&q.get('encryption')!=='none') throw new Error('Поддерживается только encryption=none.');
- const supported=new Set(['security','type','sni','serverName','pbk','sid','flow','fp','path','host','mode','encryption']);
+ const supported=new Set(['security','type','sni','serverName','pbk','sid','flow','fp','path','host','mode','encryption','extra']);
  for(const [key] of q) if(!supported.has(key)) throw new Error(`Параметр «${key}» не поддерживается профилем проверки. Используйте ручную настройку, если он не нужен вашему подключению.`);
  if(q.get('sni')&&q.get('serverName')&&q.get('sni')!==q.get('serverName')) throw new Error('Параметры sni и serverName противоречат друг другу.');
  const profile:ProbeProfile={port:Number(uri.port),uuid:decodeURIComponent(uri.username),transport:transport==='xhttp'?'xhttp':'tcp',security:security as ProbeProfile['security'],server_name:q.get('sni')||q.get('serverName')||'',public_key:q.get('pbk')||'',short_id:q.get('sid')||'',flow:q.get('flow')||'',fingerprint:q.get('fp')||'chrome',path:q.get('path')||'/',host:q.get('host')||'',xhttp_mode:q.get('mode')||'auto'};
  if(!uri.hostname||!uri.port) throw new Error('В ссылке нужны адрес сервера и явный порт.');
+ if(q.has('extra'))profile.xhttp_extra=parseXHTTPExtra(q.get('extra')!,profile.transport,profile.xhttp_mode);
  return validateProfile(profile);
 }
 export function isPublicIPv4(value:string):boolean {
