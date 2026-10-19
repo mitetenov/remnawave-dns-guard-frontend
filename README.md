@@ -19,6 +19,16 @@ Vite проксирует `/api` на `http://localhost:8000`. Backend долж�
 UI обращается к API с того же origin; отдельный публичный API URL ему не нужен.
 API-контракт находится в [CONTRACT.md бэкенда](https://github.com/mitetenov/remnawave-dns-guard-backend/blob/main/CONTRACT.md).
 
+## Профили XHTTP
+
+Параметр `extra` из VLESS-ссылки или выбранного сервера подписки сохраняется
+как JSON-объект `xhttp_extra`. Поле «XHTTP extra (JSON)» позволяет проверить,
+изменить или очистить его перед сохранением. Поддерживаются padding, headers,
+параметры POST и xmux закреплённого Xray v26.3.27; максимум 16 КиБ. Неизвестные
+поля и отдельное подключение `downloadSettings` отклоняются. Переключение на
+TCP очищает extra. Для использования обновите RU-агент до 1.1.0+, затем backend
+и frontend: старые агенты не получают профили с новым полем.
+
 ## Docker
 
 ```sh
