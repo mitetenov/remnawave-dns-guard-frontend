@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {PoolDetail,PoolTable,TargetForm} from './App';
+import {PoolDetail,PoolTable,TargetForm,TargetDeleteModal} from './App';
 import {TargetCards} from './TargetCards';
 import type {Pool,Target} from './types';
 
@@ -29,6 +29,15 @@ describe('pool deletion and target editing controls',()=>{
   const buttons=view.match(/<button\b[^>]*>/g);
   expect(buttons).toHaveLength(3);
   expect(buttons!.every(button=>button.includes('disabled'))).toBe(true);
+ });
+ it('keeps DNS deletion unchecked and clearly preserves the record by default',()=>{
+  const view=renderToStaticMarkup(<TargetDeleteModal target={target} onClose={noop} onDeleted={saved} onFailure={saved}/>);
+  const checkbox=view.match(/<input\b[^>]*type="checkbox"[^>]*>/)?.[0];
+  expect(checkbox).toBeDefined();
+  expect(checkbox).not.toContain('checked');
+  expect(view).toContain('Удалить также A-запись');
+  expect(view).toContain('A-запись в Cloudflare сохранится.');
+  expect(view).not.toContain('Последнюю A-запись удалить нельзя.');
  });
  it('prefills the edit form and explains the DNS replacement',()=>{
   const view=renderToStaticMarkup(<TargetForm pool={pool} target={target} onClose={noop} onSaved={saved} onFailure={saved}/>);
