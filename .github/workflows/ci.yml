@@ -43,6 +43,8 @@ jobs:
           tags: dns-guard-frontend:ci
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
+      - name: Require AMD64 image
+        run: test "$(docker image inspect dns-guard-frontend:ci --format '{{.Architecture}}')" = amd64
       - name: Check running image
         run: python3 scripts/smoke_image.py dns-guard-frontend:ci
 

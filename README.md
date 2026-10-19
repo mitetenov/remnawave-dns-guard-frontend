@@ -22,14 +22,17 @@ API-контракт находится в [CONTRACT.md бэкенда](https://
 ## Docker
 
 ```sh
-docker build -t remnawave-dns-guard-frontend:local .
+docker build --platform linux/amd64 -t remnawave-dns-guard-frontend:local .
 python3 scripts/smoke_image.py remnawave-dns-guard-frontend:local
 ```
 
 Готовый образ: `mitetenov/remnawave-dns-guard-frontend:latest`.
 nginx ожидает backend по адресу `backend:8000` в общей Docker-сети.
+Образы поддерживают только `linux/amd64`; сборка для другой архитектуры завершается ошибкой.
 Compose для всей панели и инструкции HTTPS находятся в репозитории бэкенда;
 для запуска готовых образов исходники фронтенда на сервере не нужны.
+
+Runtime использует официальный `nginx:1.28-alpine-slim` без дополнительных модулей, которые панель не использует. Node.js и зависимости сборки остаются только в build stage. Сначала устанавливаются зависимости по `package-lock.json`, затем копируются исходники UI. Кеш npm хранится в BuildKit; слой `npm ci` также переиспользуется через GitHub Actions layer cache. Документация и тесты исключены из Docker-контекста, а изменение nginx-конфига не пересобирает UI. Готовые assets и конфиги копируются независимыми `COPY --link` слоями.
 
 ## CI
 
