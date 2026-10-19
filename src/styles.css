@@ -16,3 +16,9 @@
 .target-card footer{flex-wrap:wrap}.target-card footer .button{flex:1 1 110px}
 
 .dns-delete-option{display:flex;align-items:center;gap:10px;padding:14px;margin:20px 0;border:1px solid var(--border);border-radius:8px;font-size:12px;line-height:1.6;cursor:pointer}.dns-delete-option input{width:16px;min-height:16px;height:16px;margin:0;padding:0;flex:0 0 auto;accent-color:var(--teal)}
+.target-ip{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.target-name .target-ip{font-size:10px}
+.copy-ip{width:24px;height:24px;flex-shrink:0;vertical-align:middle}
+.copy-ip.copied{color:var(--teal)}
+.copy-ip.error{color:var(--red)}
+@media(max-width:760px){.copy-ip{width:44px;height:44px}}
