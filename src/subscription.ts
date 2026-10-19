@@ -22,11 +22,11 @@ export function subscriptionServers(uris:string[]):SubscriptionServer[] {
  });
 }
 
-export async function loadSubscription(value:string):Promise<SubscriptionServer[]> {
+export async function loadSubscription(value:string,useHwid=false):Promise<SubscriptionServer[]> {
  let url:URL;
  try {url=new URL(value.trim());}
  catch {throw new Error('Укажите HTTPS-ссылку на подписку.');}
  if(url.protocol!=='https:'||url.username||url.password||url.hash)throw new Error('Укажите HTTPS-ссылку на подписку без логина, пароля и фрагмента.');
- const result=await api<{uris:string[]}>('/subscriptions/preview',json('POST',{url:url.href}));
+ const result=await api<{uris:string[]}>('/subscriptions/preview',json('POST',{url:url.href,...(useHwid?{use_hwid:true}:{})}));
  return subscriptionServers(result.uris);
 }

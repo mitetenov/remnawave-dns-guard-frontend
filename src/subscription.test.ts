@@ -38,4 +38,17 @@ describe('subscription server selection',()=>{
   vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({detail:'Подписка недоступна'}),{status:422})));
   await expect(loadSubscription('https://sub.example.com/token')).rejects.toThrow('Подписка недоступна');
  });
+ it('sends HWID opt-in only when the operator explicitly selects it',async()=>{
+  const fetch=vi.fn().mockImplementation(()=>Promise.resolve(new Response(JSON.stringify({uris:[uri]}))));
+  vi.stubGlobal('fetch',fetch);
+  await loadSubscription('https://sub.example.com/token',true);
+  expect(fetch).toHaveBeenLastCalledWith('/api/subscriptions/preview',expect.objectContaining({body:JSON.stringify({url:'https://sub.example.com/token',use_hwid:true})}));
+  await loadSubscription('https://sub.example.com/token',false);
+  expect(fetch).toHaveBeenLastCalledWith('/api/subscriptions/preview',expect.objectContaining({body:JSON.stringify({url:'https://sub.example.com/token'})}));
+ });
+ it('preserves actionable HWID errors instead of presenting a placeholder as a server',async()=>{
+  const detail='Подписка требует HWID. Отметьте «Использовать DNS Guard как отдельное устройство» и повторите загрузку.';
+  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({detail}),{status:422})));
+  await expect(loadSubscription('https://sub.example.com/token')).rejects.toThrow(detail);
+ });
 });
