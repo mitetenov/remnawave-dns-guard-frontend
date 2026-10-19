@@ -13,6 +13,7 @@ def docker(*args):
 
 
 def main(image):
+    assert docker("image", "inspect", image, "--format", "{{.Architecture}}") == "amd64"
     suffix = uuid.uuid4().hex[:12]
     network, upstream, frontend = ("guard-smoke-" + suffix + kind for kind in ("-net", "-upstream", "-ui"))
     try:
@@ -20,10 +21,10 @@ def main(image):
         fixture = '''events {}\nhttp { server { listen 8000; location /api/health {
             default_type application/json; return 200 '{"upstream":"fixture"}';
         } } }\n'''
-        docker("run", "-d", "--name", upstream, "--network", network,
+        docker("run", "--platform", "linux/amd64", "-d", "--name", upstream, "--network", network,
                "--network-alias", "backend", "--entrypoint", "sh", image, "-c",
                "printf %s " + shlex.quote(fixture) + " > /tmp/fixture.conf && exec nginx -c /tmp/fixture.conf -g 'daemon off;'")
-        docker("run", "-d", "--name", frontend, "--network", network, "-p", "127.0.0.1::80", image)
+        docker("run", "--platform", "linux/amd64", "-d", "--name", frontend, "--network", network, "-p", "127.0.0.1::80", image)
         port = docker("port", frontend, "80/tcp").rsplit(":", 1)[1]
         base = "http://127.0.0.1:" + port
 
