@@ -10,3 +10,5 @@
 
 .profile-modes button{width:auto;flex:1;min-width:0;line-height:1.6}.subscription-servers{margin-top:20px}
 @media(max-width:480px){.profile-modes{flex-wrap:wrap}.profile-modes button{flex-basis:100%}}
+
+.subscription-device{display:flex;gap:10px;align-items:flex-start;margin:0 0 20px;font-size:11px;color:#a8bdd1;line-height:1.7}.subscription-device input{flex:0 0 auto;width:16px;min-height:16px;margin:2px 0 0;padding:0;accent-color:var(--teal)}.subscription-device small{display:block;margin-top:5px;font-size:10px;color:#7892aa;line-height:1.8}
