@@ -74,3 +74,7 @@ Deploy автоматически не выполняется.
 
 Repository variables: `DOCKERHUB_USERNAME`, `DOCKERHUB_IMAGE`.
 Repository secret: `DOCKERHUB_TOKEN` с правами Read & Write.
+
+## Уведомления
+
+В настройках есть отдельный раздел Telegram: токен бота, Chat ID для ЛС или группы (`-100…`), тестовое сообщение с введёнными данными до сохранения и переключатель паузы без удаления токена/чата. Токен не возвращается сервером; пустое поле сохраняет текущий. Переключатель применяется сразу, изменения токена/чата — по кнопке «Сохранить Telegram». Требуется backend с API `/api/notifications/telegram` и `/api/notifications/telegram/test`.

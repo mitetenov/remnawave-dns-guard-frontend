@@ -22,3 +22,5 @@
 .copy-ip.copied{color:var(--teal)}
 .copy-ip.error{color:var(--red)}
 @media(max-width:760px){.copy-ip{width:44px;height:44px}}
+
+.notification-settings{margin-top:24px}.notification-settings .panel-heading h2{display:flex;align-items:center;gap:8px}.integration-icon.telegram{background:#123247;color:#63c6f1}.notification-switch{margin-left:auto;flex-shrink:0;width:42px;height:24px;border:1px solid #40536a;border-radius:20px;background:#243145;padding:3px;cursor:pointer}.notification-switch span{display:block;width:16px;height:16px;background:#a5b4c7;border-radius:50%;transition:transform .15s}.notification-switch.on{background:#16453e;border-color:#35d5b0}.notification-switch.on span{background:#35d5b0;transform:translateX(17px)}.notification-switch:disabled{cursor:default;opacity:.5}.notification-help{font-size:11px;line-height:1.8;color:#8190a8;margin:20px 0 0}.notification-settings .field a{color:#79a9ef}
