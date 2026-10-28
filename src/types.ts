@@ -1,5 +1,8 @@
-export interface Checker {id:string;version:string;last_seen:string;healthy:boolean;status:'online'|'control_unhealthy'|'offline'}
-export interface TargetCheck {agent_id:string;fresh:boolean;failures:number;successes:number;last_checked_at:string|null;last_latency_ms:number|null;last_error:string|null;outcome:boolean|null}
+export interface CheckerProxy {configured:boolean;supported:boolean;endpoint:string;healthy:boolean;checked_at:string|null;latency_ms:number|null;exit_ip:string|null;test:{id:string;status:'pending'|'passed'|'failed'|'timeout'}|null}
+export interface CheckerRoutes {direct:boolean;socks5:boolean;revision:number;supported:boolean}
+export interface Checker {id:string;version:string;last_seen:string;healthy:boolean;status:'online'|'control_unhealthy'|'proxy_unhealthy'|'offline'|'paused';proxy?:CheckerProxy;routes?:CheckerRoutes;direct_healthy?:boolean}
+export interface RouteResult {outcome:'success'|'failure'|'skipped';latency_ms?:number;error?:string}
+export interface TargetCheck {agent_id:string;fresh:boolean;failures:number;successes:number;last_checked_at:string|null;last_latency_ms:number|null;last_error:string|null;outcome:boolean|null;routes?:{direct?:RouteResult;socks5?:RouteResult}}
 export interface Pool {id:string;name:string;hostname:string;zone_id:string;ttl:number;interval_seconds:number;failure_threshold:number;recovery_threshold:number;automation_enabled:boolean;profile_configured:boolean;created_at:string;dns_checked_at:string|null;dns_error:string|null;dns_drift_count:number;target_summary?:{active:number;total:number;status:TargetStatus}}
 export type PoolInput = Pick<Pool,'name'|'hostname'|'zone_id'|'ttl'|'interval_seconds'|'failure_threshold'|'recovery_threshold'|'automation_enabled'>;
 export type TargetStatus = 'unknown'|'healthy'|'suspect'|'excluded'|'recovering'|'disabled'|'protected'|'stale';
