@@ -9,6 +9,7 @@ export function TargetChecks({target,pool}:{target:Target;pool:Pool}){
    {check.last_checked_at&&<time dateTime={check.last_checked_at}>{new Date(check.last_checked_at).toLocaleString('ru-RU')}</time>}
    {check.last_latency_ms!==null&&<small>{Math.round(check.last_latency_ms)} мс</small>}
    {check.last_error&&<small>{check.last_error}</small>}
+   {check.routes&&Object.entries(check.routes).map(([route,result])=><small key={route}>{route==='direct'?'Напрямую':'Через SOCKS5'}: {result.outcome==='success'?'успех':result.outcome==='failure'?'ошибка':'пропущено'}{result.error?` · ${result.error}`:''}</small>)}
   </li>)}</ul>
  </details>;
 }
