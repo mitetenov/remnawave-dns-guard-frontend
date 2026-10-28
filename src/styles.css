@@ -26,3 +26,20 @@
 .notification-settings{margin-top:24px}.notification-settings .panel-heading h2{display:flex;align-items:center;gap:8px}.integration-icon.telegram{background:#123247;color:#63c6f1}.notification-switch{margin-left:auto;flex-shrink:0;width:42px;height:24px;border:1px solid #40536a;border-radius:20px;background:#243145;padding:3px;cursor:pointer}.notification-switch span{display:block;width:16px;height:16px;background:#a5b4c7;border-radius:50%;transition:transform .15s}.notification-switch.on{background:#16453e;border-color:#35d5b0}.notification-switch.on span{background:#35d5b0;transform:translateX(17px)}.notification-switch:disabled{cursor:default;opacity:.5}.notification-help{font-size:11px;line-height:1.8;color:#8190a8;margin:20px 0 0}.notification-settings .field a{color:#79a9ef}
 
 .pool-target-count{display:inline-flex;align-items:baseline;white-space:nowrap;font-variant-numeric:tabular-nums;font-size:12px;color:var(--status-muted)}.pool-target-active{font-weight:600}.pool-target-active.green{color:var(--status-green)}.pool-target-active.amber{color:var(--status-amber)}.pool-target-active.red{color:var(--status-red)}.pool-target-active.blue{color:var(--status-blue)}
+
+/* Auto-discovered checkers and independent per-IP evidence. */
+.checkers-panel>p{margin:16px 20px;color:var(--text-secondary,#94a3b8);font-size:13px;line-height:1.6}
+.checkers-panel>.info-note{margin:16px 20px}
+.checker-list{list-style:none;padding:0 20px;margin:0}
+.checker-list>li{padding:16px 0;border-bottom:1px solid var(--border,#263648)}
+.checker-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.checker-heading strong{overflow-wrap:anywhere}
+.checker-list dl{font-size:12px;margin:12px 0 0}
+.checker-list dl>div{display:flex;justify-content:space-between;gap:12px;margin-top:8px}
+.checker-list dt{color:var(--text-secondary,#94a3b8)}
+.checker-list dd{margin:0;text-align:right}
+.target-checks{margin-top:10px;font-size:12px;max-width:320px;white-space:normal}
+.target-checks summary{cursor:pointer;color:var(--text-secondary,#94a3b8)}
+.target-checks ul{list-style:none;padding:0;margin:8px 0}
+.target-checks li{display:flex;flex-direction:column;gap:5px;padding:10px 0;border-top:1px solid var(--border,#263648);overflow-wrap:anywhere}
+.target-checks small,.target-checks time{color:var(--text-secondary,#94a3b8)}
