@@ -29,7 +29,7 @@ export function NotificationsSettings({onAuthError}:{onAuthError:(error:unknown)
  }
  const configured=!!settings?.bot_token_configured&&!!settings.chat_id;
  return <form className="panel notification-settings" onSubmit={save}>
-  <div className="panel-heading"><div><h2><Bell size={17}/> Уведомления</h2><p>Изменения статусов хостов</p></div></div>
+  <div className="panel-heading"><div><h2><Bell size={17}/> Уведомления</h2><p>Отключение и восстановление хостов</p></div></div>
   {error&&<div className="error-box" role="alert"><TriangleAlert size={18}/><span>{error}</span></div>}
   {!settings?<div className="settings-section">{!error&&<span className="loading-label"><LoaderCircle className="spin" size={17}/>Загрузка настроек…</span>}</div>:<>
    <div className="settings-section">
@@ -38,7 +38,7 @@ export function NotificationsSettings({onAuthError}:{onAuthError:(error:unknown)
     <label className="field"><span>Chat ID</span><input type="text" value={chat} onChange={e=>{setChat(e.target.value);setMessage('');}} placeholder="123456789 или -1001234567890" autoComplete="off" spellCheck={false} required disabled={!!busy}/><small>Для ЛС укажите свой положительный Chat ID и нажмите «Старт» у бота. Для группы укажите отрицательный ID (например, -100…) и добавьте бота с правом отправлять сообщения.</small></label>
     <button type="button" className="button secondary" onClick={()=>void test()} disabled={!!busy||!(token.trim()||settings.bot_token_configured)||!chat.trim()}>{busy==='test'?<><LoaderCircle className="spin" size={16}/>Отправка…</>:<><Send size={16}/>Отправить тестовое сообщение</>}</button>
     {message&&<div className="inline-success" role="status"><CheckCircle2 size={17}/><span>{message}</span></div>}
-    <p className="notification-help">При смене статуса придут имя и IP хоста, пул, предыдущий и новый статус. Повторные проверки с тем же статусом не создают уведомлений. Переключатель сразу ставит уведомления на паузу, сохраняя токен и чат.</p>
+    <p className="notification-help">Уведомления приходят только при переходе в «Исключён», «Отключён вручную» или «Доступен». Промежуточные статусы не отправляются. В сообщении — имя и IP хоста, пул, предыдущий и новый статус. Повторные проверки с тем же статусом не создают уведомлений. Переключатель сразу ставит уведомления на паузу, сохраняя токен и чат.</p>
    </div>
    <div className="settings-save"><span>{configured?'Тест использует введённые данные без сохранения.':'Сохранение подключит Telegram и включит уведомления.'}</span><button className="button primary" disabled={!!busy||!(token.trim()||settings.bot_token_configured)||!chat.trim()}>{busy==='save'?<><LoaderCircle className="spin" size={17}/>Сохранение…</>:<><Check size={17}/>Сохранить Telegram</>}</button></div>
   </>}
