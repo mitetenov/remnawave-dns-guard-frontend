@@ -1,4 +1,4 @@
-export interface CheckerProxy {configured:boolean;supported:boolean;endpoint:string;healthy:boolean;checked_at:string|null;latency_ms:number|null;exit_ip:string|null;test:{id:string;status:'pending'|'passed'|'failed'|'timeout'}|null}
+export interface CheckerProxy {url?:string;draft_test_supported?:boolean;configured:boolean;supported:boolean;endpoint:string;healthy:boolean;checked_at:string|null;latency_ms:number|null;exit_ip:string|null;test:{id:string;status:'pending'|'passed'|'failed'|'timeout';draft?:boolean;endpoint?:string;latency_ms?:number|null;exit_ip?:string|null;checked_at?:string|null}|null}
 export interface CheckerRoutes {direct:boolean;socks5:boolean;revision:number;supported:boolean}
 export interface Checker {id:string;version:string;last_seen:string;healthy:boolean;status:'online'|'control_unhealthy'|'proxy_unhealthy'|'offline'|'paused';proxy?:CheckerProxy;routes?:CheckerRoutes;direct_healthy?:boolean}
 export interface RouteResult {outcome:'success'|'failure'|'skipped';latency_ms?:number;error?:string}
