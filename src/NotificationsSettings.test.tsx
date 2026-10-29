@@ -18,7 +18,7 @@ describe('Telegram notification settings',()=>{
  it('shows a separate notifications section while loading',()=>{
   const html=renderToStaticMarkup(<NotificationsSettings onAuthError={()=>''}/>);
   expect(html).toContain('Уведомления');
-  expect(html).toContain('Изменения статусов хостов');
+  expect(html).toContain('Отключение и восстановление хостов');
   expect(html).toContain('Загрузка настроек');
  });
 });
