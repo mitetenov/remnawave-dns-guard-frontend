@@ -30,7 +30,7 @@ export function AgentDetail({agent,onChanged,onReload,onAuthError}:{agent:Checke
    </section>
    <section className="panel agent-route" aria-label="Проверка через SOCKS5">
     <div className="panel-heading"><div><h2><ShieldCheck size={20}/>Через SOCKS5</h2><p>Проверка из сети выхода прокси</p></div><button type="button" role="switch" aria-label="Проверять через SOCKS5" aria-checked={routes.socks5} className={`notification-switch ${routes.socks5?'on':''}`} disabled={busy||!proxySupported||!agent.proxy?.configured} onClick={()=>void toggle('socks5_enabled',!routes.socks5)}><span/></button></div>
-    <div className="agent-route-body"><p>Агент → SOCKS5 → Xray-нода → тестовый HTTPS-сайт.</p><p>Сбой самого SOCKS5 пропускает только этот маршрут. Прямая проверка продолжает работать.</p>{!agent.proxy?.configured&&proxySupported&&<p>Сначала сохраните прокси, затем включите этот маршрут.</p>}<CheckerProxy agent={agent} onAuthError={onAuthError} onChanged={proxyChanged}/></div>
+    <div className="agent-route-body"><p>Агент → SOCKS5 → Xray-нода → тестовый HTTPS-сайт.</p><p>Сбой самого SOCKS5 пропускает только этот маршрут. Прямая проверка продолжает работать.</p>{!agent.proxy?.configured&&proxySupported&&<p>Введите данные и проверьте прокси. После сохранения можно включить маршрут.</p>}<CheckerProxy agent={agent} onAuthError={onAuthError} onChanged={proxyChanged}/></div>
    </section>
   </div>
   <div className="info-note"><Activity size={18}/><p>Ошибка VLESS в любом включённом маршруте проваливает общий чек. Если достоверных результатов нет, чек пропускается. Когда оба маршрута выключены, агент остаётся на связи без проверок.</p></div>
