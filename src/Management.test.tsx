@@ -47,9 +47,11 @@ describe('pool deletion and target editing controls',()=>{
   expect(view).toContain('Сохранить изменения');
   expect(view).toContain('новая A-запись будет подтверждена до удаления старой');
  });
- it('keeps the add form empty and uses creation wording',()=>{
+ it('keeps new nodes inactive until the required successful checks',()=>{
   const view=renderToStaticMarkup(<TargetForm pool={pool} onClose={noop} onSaved={saved} onFailure={saved}/>);
-  expect(view).toContain('Добавить и создать A-запись');
+  expect(view).toContain('Добавить и проверить');
+  expect(view).toContain('Узел останется неактивным до успешных проверок');
+  expect(view).toContain('5 успешных проверок подряд');
   expect(view).not.toContain('value="Germany 01"');
   expect(view).not.toContain('Сохранить изменения');
  });

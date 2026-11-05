@@ -5,6 +5,14 @@ import type {Target} from './types';
 
 const target={dns_present:true,dns_uncertain:false,dns_pending_action:null,dns_error:null,dns_checked_at:null,dns_drift:false} as Target;
 describe('DNS confirmation',()=>{
+ it.each(['enroll','enable'])('waits for successful checks before confirming %s',dns_pending_action=>{
+  const view=renderToStaticMarkup(<TargetDNS target={{...target,dns_present:false,dns_uncertain:true,dns_pending_action}}/>);
+  expect(view).toContain('Ожидает проверок');expect(view).not.toContain('В DNS');
+ });
+ it('keeps activation errors visible until DNS is confirmed',()=>{
+  const view=renderToStaticMarkup(<TargetDNS target={{...target,dns_present:false,dns_pending_action:'enable',dns_error:'Cloudflare API unavailable'}}/>);
+  expect(view).toContain('Ожидает подтверждения');expect(view).toContain('Cloudflare API unavailable');expect(view).not.toContain('В DNS');
+ });
  it('never presents a pending removal as verified DNS',()=>{
   const view=renderToStaticMarkup(<TargetDNS target={{...target,dns_pending_action:'disable'}}/>);
   expect(view).toContain('Ожидает подтверждения');expect(view).not.toContain('В DNS');
