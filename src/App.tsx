@@ -42,10 +42,26 @@ export default function App(){
  const [loading,setLoading]=useState(true),[loadError,setLoadError]=useState(''),[updated,setUpdated]=useState<Date|null>(null),[notice,setNotice]=useState<Notice|null>(null),[modal,setModal]=useState<ModalState>(null),[busyKeys,setBusyKeys]=useState<Set<string>>(new Set());
  const [eventLevel,setEventLevel]=useState(''),[eventType,setEventType]=useState(''),[eventPool,setEventPool]=useState(''),[eventLoading,setEventLoading]=useState(false),[eventError,setEventError]=useState('');
  const selected=pools.find(p=>p.id===selectedId)||null;
- const selectedRef=useRef(selectedId),targetRequest=useRef(0),eventRequest=useRef(0);selectedRef.current=selectedId;
- const handleFailure=useCallback((error:unknown)=>{if(error instanceof ApiError&&error.status===401){setUser(null);setModal(null);}return errorMessage(error);},[]);
+ const selectedRef=useRef(selectedId),dashboardRequest=useRef(0),targetRequest=useRef(0),eventRequest=useRef(0);selectedRef.current=selectedId;
+ const invalidateRequests=useCallback(()=>{dashboardRequest.current++;targetRequest.current++;eventRequest.current++;},[]);
+ const handleFailure=useCallback((error:unknown)=>{if(error instanceof ApiError&&error.status===401){invalidateRequests();setUser(null);setModal(null);}return errorMessage(error);},[invalidateRequests]);
  useEffect(()=>{let active=true;api<{username:string}>('/auth/me').then(data=>{if(active)setUser(data.username);}).catch(error=>{if(active&&(!(error instanceof ApiError)||error.status!==401))setLoadError(errorMessage(error));}).finally(()=>{if(active)setAuthLoading(false);});return()=>{active=false;};},[]);
- const load=useCallback(async(quiet=false)=>{if(!quiet)setLoading(true);const results=await Promise.allSettled([api<Overview>('/overview'),api<Pool[]>('/pools'),api<Settings>('/settings')]);let firstError='';if(results[0].status==='fulfilled')setOverview(results[0].value);else firstError=handleFailure(results[0].reason);if(results[1].status==='fulfilled')setPools(results[1].value);else firstError ||=handleFailure(results[1].reason);if(results[2].status==='fulfilled')setSettings(results[2].value);else firstError ||=handleFailure(results[2].reason);setLoadError(firstError);if(!firstError)setUpdated(new Date());setLoading(false);},[handleFailure]);
+ const load=useCallback(async(quiet=false)=>{
+  const request=++dashboardRequest.current;
+  if(!quiet)setLoading(true);
+  const results=await Promise.allSettled([api<Overview>('/overview'),api<Pool[]>('/pools'),api<Settings>('/settings')]);
+  if(request!==dashboardRequest.current)return;
+  const errors=results.flatMap(result=>result.status==='rejected'?[result.reason]:[]);
+  const authError=errors.find(error=>error instanceof ApiError&&error.status===401);
+  if(authError){handleFailure(authError);setLoading(false);return;}
+  if(results[0].status==='fulfilled')setOverview(results[0].value);
+  if(results[1].status==='fulfilled')setPools(results[1].value);
+  if(results[2].status==='fulfilled')setSettings(results[2].value);
+  const firstError=errors.length?handleFailure(errors[0]):'';
+  setLoadError(firstError);
+  if(!firstError)setUpdated(new Date());
+  setLoading(false);
+ },[handleFailure]);
  const loadTargets=useCallback(async(id:string,quiet=false)=>{const request=++targetRequest.current;if(!quiet)setTargetsLoading(true);try{const data=await api<Target[]>(`/pools/${id}/targets`);if(request===targetRequest.current&&selectedRef.current===id)setTargets(data);}catch(error){if(request===targetRequest.current&&selectedRef.current===id)setNotice({message:handleFailure(error),error:true});}finally{if(request===targetRequest.current&&selectedRef.current===id)setTargetsLoading(false);}},[handleFailure]);
  const loadEvents=useCallback(async(quiet=false)=>{const request=++eventRequest.current;if(!quiet)setEventLoading(true);const query=new URLSearchParams({limit:page==='overview'?'8':'100'});if(page==='events'){if(eventLevel)query.set('level',eventLevel);if(eventType)query.set('type',eventType);if(eventPool)query.set('pool_id',eventPool);}try{const data=await api<GuardEvent[]>(`/events?${query}`);if(request===eventRequest.current){setEvents(data);setEventError('');}}catch(error){if(request===eventRequest.current)setEventError(handleFailure(error));}finally{if(request===eventRequest.current)setEventLoading(false);}},[page,eventLevel,eventType,eventPool,handleFailure]);
  useEffect(()=>{if(user)void load();},[user,load]);
@@ -58,7 +74,7 @@ export default function App(){
  const refreshAfterError=async()=>{await load(true);if(selectedId)await loadTargets(selectedId,true);};
  const run=async(key:string,action:()=>Promise<unknown>,message:string|((result:unknown)=>string))=>{setBusyKeys(previous=>new Set(previous).add(key));try{const result=await action();setNotice({message:typeof message==='function'?message(result):message,error:false});await load(true);if(selectedId)await loadTargets(selectedId,true);if(page==='overview'||page==='events')await loadEvents(true);}catch(error){setNotice({message:handleFailure(error),error:true});if(!(error instanceof ApiError&&error.status===401))await refreshAfterError();}finally{setBusyKeys(previous=>{const next=new Set(previous);next.delete(key);return next;});}};
  const checkPool=(pool:Pool)=>run(`${pool.id}-check`,()=>api(`/pools/${pool.id}/check`,json('POST')),'Проверка поставлена в очередь. Каждый чекер выполнит проверку после следующего опроса панели.');
- const signOut=async()=>{setBusyKeys(previous=>new Set(previous).add('logout'));try{await api('/auth/logout',json('POST'));setUser(null);setOverview(null);setPools([]);setSelectedId(null);setTargets([]);setEvents([]);setSettings(null);setNotice(null);setLoadError('');setEventLevel('');setEventType('');setEventPool('');}catch(error){setNotice({message:handleFailure(error),error:true});}finally{setBusyKeys(previous=>{const next=new Set(previous);next.delete('logout');return next;});}};
+ const signOut=async()=>{setBusyKeys(previous=>new Set(previous).add('logout'));try{await api('/auth/logout',json('POST'));invalidateRequests();setUser(null);setOverview(null);setPools([]);setSelectedId(null);setTargets([]);setEvents([]);setSettings(null);setNotice(null);setLoadError('');setEventLevel('');setEventType('');setEventPool('');}catch(error){setNotice({message:handleFailure(error),error:true});}finally{setBusyKeys(previous=>{const next=new Set(previous);next.delete('logout');return next;});}};
  const openPool=(pool:Pool)=>{setSelectedId(pool.id);navigate('pools');};
  const togglePool=(pool:Pool)=>{if(pool.automation_enabled){void run(pool.id,()=>api(`/pools/${pool.id}`,json('PATCH',{automation_enabled:false})),'Автоматизация приостановлена. Проверки продолжаются.');}else setModal({type:'confirm',title:'Включить автоматизацию?',description:`DNS Guard будет исключать и возвращать A-записи ${pool.hostname} по результатам проверок из РФ. Последняя A-запись останется защищённой. Для запуска нужны профиль и хотя бы один узел.`,label:'Включить автоматизацию',action:()=>api(`/pools/${pool.id}`,json('PATCH',{automation_enabled:true}))});};
  const deletePool=(pool:Pool)=>setModal({type:'confirm',title:'Удалить DNS-пул?',description:`Пул «${pool.name}» (${pool.hostname}), его узлы и профиль будут удалены из панели. Проверки и автоматизация остановятся. A-записи в Cloudflare сохранятся.`,label:'Удалить пул',danger:true,deletedPoolId:pool.id,successMessage:'Пул удалён. A-записи в Cloudflare сохранены.',action:()=>api(`/pools/${pool.id}`,json('DELETE'))});

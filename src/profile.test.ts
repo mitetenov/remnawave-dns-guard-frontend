@@ -11,6 +11,6 @@ describe('VLESS profile parser',()=>{
  it('requires TLS SNI and preserves explicit port',()=>{expect(()=>parseVless(`vless://${uuid}@1.1.1.1:443?security=tls`)).toThrow('SNI');expect(parseVless(`vless://${uuid}@1.1.1.1:12345?security=tls&sni=example.com`).port).toBe(12345);});
 });
 describe('public IPv4 input',()=>{
- it.each(['1.1.1.1','8.8.8.8','93.184.216.34'])('accepts %s',ip=>expect(isPublicIPv4(ip)).toBe(true));
- it.each(['localhost','node.example.com','::1','10.0.0.1','127.0.0.1','192.168.1.1','172.16.0.1','100.64.0.1','169.254.1.1','192.0.2.1','198.51.100.1','203.0.113.1','198.18.1.1','224.0.0.1','255.255.255.255','1.1.1.256','01.1.1.1'])('rejects %s',ip=>expect(isPublicIPv4(ip)).toBe(false));
+ it.each(['1.1.1.1','8.8.8.8','93.184.216.34','192.2.10.20','192.0.100.1','192.0.1.1','192.0.3.1','192.0.0.9','192.0.0.10'])('accepts %s',ip=>expect(isPublicIPv4(ip)).toBe(true));
+ it.each(['localhost','node.example.com','::1','10.0.0.1','127.0.0.1','192.168.1.1','172.16.0.1','100.64.0.1','169.254.1.1','192.0.0.8','192.0.0.11','192.0.0.255','192.0.2.0','192.0.2.1','192.0.2.255','198.51.100.1','203.0.113.1','198.18.1.1','224.0.0.1','255.255.255.255','1.1.1.256','01.1.1.1'])('rejects %s',ip=>expect(isPublicIPv4(ip)).toBe(false));
 });
