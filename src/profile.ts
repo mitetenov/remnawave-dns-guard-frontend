@@ -46,5 +46,6 @@ export function parseVless(value:string):ProbeProfile {
 export function isPublicIPv4(value:string):boolean {
  const p=value.split('.'); if(p.length!==4||p.some(x=>!/^\d{1,3}$/.test(x)||Number(x)>255||String(Number(x))!==x)) return false;
  const [a,b,c]=p.map(Number);
- return !(a===0||a===10||a===127||a>=224||a===169&&b===254||a===172&&b>=16&&b<=31||a===192&&b===168||a===100&&b>=64&&b<=127||a===192&&b===0||a===192&&b===2||a===198&&(b===18||b===19||b===51&&c===100)||a===203&&b===0&&c===113);
+ if(value==='192.0.0.9'||value==='192.0.0.10')return true;
+ return !(a===0||a===10||a===127||a>=224||a===169&&b===254||a===172&&b>=16&&b<=31||a===192&&b===168||a===100&&b>=64&&b<=127||a===192&&b===0&&(c===0||c===2)||a===198&&(b===18||b===19||b===51&&c===100)||a===203&&b===0&&c===113);
 }
