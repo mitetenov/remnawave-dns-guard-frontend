@@ -1,5 +1,5 @@
 import {api,json} from './api';
-import {parseVless} from './profile';
+import {parseProfileURI} from './profile';
 import type {ProbeProfile} from './types';
 
 export interface SubscriptionServer {
@@ -17,7 +17,7 @@ export function subscriptionServers(uris:string[]):SubscriptionServer[] {
    address=url.host;
    if(url.hash.length>1)name=decodeURIComponent(url.hash.slice(1));
   } catch { /* Keep a safe label for malformed links. */ }
-  try {return {name,address,profile:parseVless(uri),error:''};}
+  try {return {name,address,profile:parseProfileURI(uri),error:''};}
   catch(error){return {name,address,profile:null,error:error instanceof Error?error.message:'Не удалось прочитать параметры сервера.'};}
  });
 }
