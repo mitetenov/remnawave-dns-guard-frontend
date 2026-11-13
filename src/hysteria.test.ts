@@ -20,6 +20,15 @@ describe('Hysteria2 profiles',()=>{
   const pin=Array(32).fill('AB').join(':');
   expect(parseHysteria2(`hy2://secret@edge.example.com?pinSHA256=${pin}&alpn=h3`).pin_sha256).toBe('ab'.repeat(32));
  });
+ it('imports Remnawave fm with disabled debugging and BBR from a subscription',()=>{
+  const fm=encodeURIComponent('{"quicParams":{"debug":false,"congestion":"bbr"}}');
+  const [server]=subscriptionServers([`hysteria2://fixture@edge.example.com:443/?sni=edge.example.com&fm=${fm}#Node`]);
+  expect(server).toMatchObject({name:'Node',profile:{hysteria_congestion:'bbr',server_name:'edge.example.com',port:443},error:''});
+  expect(server.profile).not.toHaveProperty('fm');
+ });
+ it.each(['{','[]','{"udp":[]}', '{"quicParams":null}', '{"quicParams":{"debug":true}}', '{"quicParams":{"congestion":"force-brutal"}}', '{"quicParams":{"udpHop":{"ports":"1000-2000"}}}'])('rejects unsafe or unsupported fm: %s',value=>{
+  expect(()=>parseHysteria2(`hy2://fixture@edge.example.com?fm=${encodeURIComponent(value)}`)).toThrow('fm');
+ });
  it.each([
   'hy2://secret@edge.example.com:0','hy2://secret@edge.example.com:65536',
   'hy2://secret@edge.example.com:443,8443','hy2://secret@edge.example.com/path',
