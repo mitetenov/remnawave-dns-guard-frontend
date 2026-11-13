@@ -28,7 +28,8 @@ async function importHysteria(){
  await act(async()=>root.render(<ProfileForm pool={pool} onClose={()=>{}} onSaved={saved}/>));
  const input=field<HTMLTextAreaElement>('VLESS / Hysteria2 URI');
  await act(async()=>{
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(input,'hy2://secret%3Apass@node.example.com:8443?sni=edge.example.com&obfs=salamander&obfs-password=obfs-secret');
+  const fm=encodeURIComponent('{"quicParams":{"debug":false,"congestion":"bbr"}}');
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(input,`hy2://secret%3Apass@node.example.com:8443?sni=edge.example.com&obfs=salamander&obfs-password=obfs-secret&fm=${fm}`);
   input.dispatchEvent(new Event('input',{bubbles:true}));
  });
  await click('Прочитать и проверить параметры');
@@ -40,11 +41,12 @@ describe('Hysteria2 profile form',()=>{
   expect(field<HTMLSelectElement>('Протокол').value).toBe('hysteria2');
   expect(field<HTMLInputElement>('Пароль Hysteria2').value).toBe('secret:pass');
   expect(field<HTMLInputElement>('Пароль Salamander').value).toBe('obfs-secret');
+  expect(field<HTMLSelectElement>('Алгоритм QUIC').value).toBe('bbr');
   expect(container.textContent).not.toContain('UUID пользователя VLESS');
   await act(async()=>container.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
   expect(api).toHaveBeenCalledWith('/pools/one/profile',expect.objectContaining({method:'PUT',body:expect.any(String)}));
   const body=JSON.parse(vi.mocked(api).mock.calls[0][1]!.body as string);
-  expect(body).toMatchObject({protocol:'hysteria2',transport:'udp',security:'tls',port:8443,server_name:'edge.example.com',password:'secret:pass',obfs:'salamander',obfs_password:'obfs-secret'});
+  expect(body).toMatchObject({protocol:'hysteria2',transport:'udp',security:'tls',port:8443,server_name:'edge.example.com',password:'secret:pass',obfs:'salamander',obfs_password:'obfs-secret',hysteria_congestion:'bbr'});
   expect(body).not.toHaveProperty('ip');expect(body).not.toHaveProperty('address');expect(saved).toHaveBeenCalledOnce();
  });
  it('clears Hysteria credentials when switching to VLESS',async()=>{
@@ -56,5 +58,6 @@ describe('Hysteria2 profile form',()=>{
   await act(async()=>{protocol.value='hysteria2';protocol.dispatchEvent(new Event('change',{bubbles:true}));});
   expect(field<HTMLInputElement>('Пароль Hysteria2').value).toBe('');
   expect(field<HTMLSelectElement>('Обфускация').value).toBe('');
+  expect(field<HTMLSelectElement>('Алгоритм QUIC').value).toBe('');
  });
 });

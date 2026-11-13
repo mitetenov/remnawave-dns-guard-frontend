@@ -1,4 +1,4 @@
-import type {ProbeProfile} from './types';
+import type {HysteriaCongestion,ProbeProfile} from './types';
 import {parseALPN,validateALPN} from './alpn';
 import {parseXHTTPExtra,validateXHTTPExtra} from './xhttpExtra';
 const URI_PARAMETERS=new Set(['security','type','sni','serverName','pbk','sid','flow','fp','path','host','mode','encryption','extra','alpn']);
@@ -12,7 +12,7 @@ export function validateProfile(p:ProbeProfile):ProbeProfile {
  if(!Number.isInteger(p.port)||p.port<1||p.port>65535) throw new Error('Порт должен быть целым числом от 1 до 65535.');
  if(p.protocol==='hysteria2')return validateHysteriaProfile(p);
  if(p.protocol!==undefined&&p.protocol!=='vless')throw new Error('Неподдерживаемый протокол проверки.');
- if(p.password||p.obfs||p.obfs_password||p.pin_sha256)throw new Error('Параметры Hysteria2 нельзя использовать в профиле VLESS.');
+ if(p.password||p.obfs||p.obfs_password||p.pin_sha256||p.hysteria_congestion!==undefined)throw new Error('Параметры Hysteria2 нельзя использовать в профиле VLESS.');
  if(!UUID.test(p.uuid)) throw new Error('Укажите корректный UUID пользователя VLESS.');
  if(!['tcp','xhttp'].includes(p.transport)) throw new Error('Поддерживаются только TCP / RAW и XHTTP.');
  if(!['reality','tls'].includes(p.security)) throw new Error('Поддерживаются только REALITY и TLS.');
@@ -35,6 +35,7 @@ function validateHysteriaProfile(p:ProbeProfile):ProbeProfile {
  if(!['','salamander'].includes(p.obfs||''))throw new Error('Поддерживается только обфускация Salamander.');
  if(Boolean(p.obfs)!==Boolean(p.obfs_password))throw new Error('Для Salamander укажите пароль обфускации.');
  if(p.pin_sha256&&!/^[a-f0-9]{64}$/i.test(p.pin_sha256))throw new Error('SHA-256 сертификата должен содержать 64 hex-символа.');
+ if(p.hysteria_congestion!==undefined&&!isHysteriaCongestion(p.hysteria_congestion))throw new Error('Алгоритм QUIC: выберите BBR, Reno или Brutal.');
  if(p.alpn!==undefined){validateALPN(p.alpn,'tls');if(p.alpn.length&&(p.alpn.length!==1||p.alpn[0]!=='h3'))throw new Error('Hysteria2 поддерживает только ALPN h3.');}
  if(p.uuid||p.public_key||p.short_id||p.flow||p.host||p.xhttp_extra!==undefined||!['','chrome'].includes(p.fingerprint)||!['','/'].includes(p.path)||!['','auto'].includes(p.xhttp_mode))throw new Error('Уберите параметры VLESS / XHTTP из профиля Hysteria2.');
  return p;
@@ -42,11 +43,31 @@ function validateHysteriaProfile(p:ProbeProfile):ProbeProfile {
 export function parseProfileURI(value:string):ProbeProfile {
  return /^(hysteria2|hy2):\/\//i.test(value.trim())?parseHysteria2(value):parseVless(value);
 }
+function isHysteriaCongestion(value:unknown):value is HysteriaCongestion {
+ return value==='bbr'||value==='reno'||value==='brutal';
+}
+function isObject(value:unknown):value is Record<string,unknown> {
+ return typeof value==='object'&&value!==null&&!Array.isArray(value);
+}
+function parseHysteriaCongestion(value:string):HysteriaCongestion|undefined {
+ let finalmask:unknown;
+ if(value.length>4096)throw new Error('Параметр fm слишком большой.');
+ try{finalmask=JSON.parse(value);}catch{throw new Error('Параметр fm должен содержать корректный JSON.');}
+ if(!isObject(finalmask)||Object.keys(finalmask).some(key=>key!=='quicParams'))throw new Error('В параметре fm поддерживаются только настройки quicParams.');
+ if(!Object.hasOwn(finalmask,'quicParams'))return undefined;
+ const quic=finalmask.quicParams;
+ if(!isObject(quic)||Object.keys(quic).some(key=>key!=='congestion'&&key!=='debug')||Object.hasOwn(quic,'debug')&&quic.debug!==false){
+  throw new Error('В fm.quicParams поддерживаются только congestion и debug: false.');
+ }
+ if(quic.congestion===undefined||quic.congestion==='')return undefined;
+ if(!isHysteriaCongestion(quic.congestion))throw new Error('Параметр fm: поддерживаются алгоритмы QUIC bbr, reno и brutal.');
+ return quic.congestion;
+}
 export function parseHysteria2(value:string):ProbeProfile {
  let uri:URL;
  try{uri=new URL(value.trim());}catch{throw new Error('Не удалось прочитать Hysteria2-ссылку. Используйте hysteria2://пароль@сервер:порт с одним портом.');}
  if(!['hysteria2:','hy2:'].includes(uri.protocol)||!uri.hostname||!['','/'].includes(uri.pathname))throw new Error('Ожидается hysteria2://пароль@сервер:порт или hy2://пароль@сервер:порт.');
- const q=uri.searchParams,allowed=new Set(['sni','obfs','obfs-password','insecure','pinSHA256','alpn']);
+ const q=uri.searchParams,allowed=new Set(['sni','obfs','obfs-password','insecure','pinSHA256','alpn','fm']);
  for(const key of new Set(q.keys())){
   if(q.getAll(key).length>1)throw new Error(`Параметр ${key} указан несколько раз.`);
   if(!allowed.has(key))throw new Error(`Параметр «${key}» не поддерживается профилем Hysteria2.`);
@@ -64,6 +85,10 @@ export function parseHysteria2(value:string):ProbeProfile {
  if(q.has('obfs'))profile.obfs=q.get('obfs') as ProbeProfile['obfs'];
  if(q.has('obfs-password'))profile.obfs_password=q.get('obfs-password')!;
  if(pin)profile.pin_sha256=pin;
+ if(q.has('fm')){
+  const congestion=parseHysteriaCongestion(q.get('fm')!);
+  if(congestion!==undefined)profile.hysteria_congestion=congestion;
+ }
  if(q.has('alpn')){const alpn=parseALPN(q.get('alpn')!,'tls');if(alpn)profile.alpn=alpn;}
  return validateProfile(profile);
 }
