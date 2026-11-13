@@ -4,8 +4,15 @@ import {parseXHTTPExtra,validateXHTTPExtra} from './xhttpExtra';
 const URI_PARAMETERS=new Set(['security','type','sni','serverName','pbk','sid','flow','fp','path','host','mode','encryption','extra','alpn']);
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const blankProfile=():ProbeProfile=>({port:443,uuid:'',transport:'tcp',security:'reality',server_name:'',public_key:'',short_id:'',flow:'',fingerprint:'chrome',path:'/',host:'',xhttp_mode:'auto'});
+export function profileForProtocol(p:ProbeProfile,protocol:'vless'|'hysteria2'):ProbeProfile {
+ const base={...blankProfile(),port:p.port,server_name:p.server_name};
+ return protocol==='hysteria2'?{...base,protocol,transport:'udp',security:'tls',password:''}:base;
+}
 export function validateProfile(p:ProbeProfile):ProbeProfile {
  if(!Number.isInteger(p.port)||p.port<1||p.port>65535) throw new Error('Порт должен быть целым числом от 1 до 65535.');
+ if(p.protocol==='hysteria2')return validateHysteriaProfile(p);
+ if(p.protocol!==undefined&&p.protocol!=='vless')throw new Error('Неподдерживаемый протокол проверки.');
+ if(p.password||p.obfs||p.obfs_password||p.pin_sha256)throw new Error('Параметры Hysteria2 нельзя использовать в профиле VLESS.');
  if(!UUID.test(p.uuid)) throw new Error('Укажите корректный UUID пользователя VLESS.');
  if(!['tcp','xhttp'].includes(p.transport)) throw new Error('Поддерживаются только TCP / RAW и XHTTP.');
  if(!['reality','tls'].includes(p.security)) throw new Error('Поддерживаются только REALITY и TLS.');
@@ -20,6 +27,45 @@ export function validateProfile(p:ProbeProfile):ProbeProfile {
  if(p.xhttp_extra!==undefined)validateXHTTPExtra(p.xhttp_extra,p.transport,p.xhttp_mode);
  if(p.alpn!==undefined)validateALPN(p.alpn,p.security);
  return p;
+}
+function validateHysteriaProfile(p:ProbeProfile):ProbeProfile {
+ if(p.transport!=='udp'||p.security!=='tls')throw new Error('Hysteria2 использует UDP / QUIC и TLS.');
+ if(!p.server_name||p.server_name.length>253||p.server_name.split('.').some(label=>!(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i).test(label)))throw new Error('Укажите корректное имя сервера (SNI).');
+ if([p.password||'',p.obfs_password||''].some(value=>[...value].length>2048||/[\x00-\x1f\x7f]/.test(value)))throw new Error('Пароль: до 2048 символов без управляющих символов.');
+ if(!['','salamander'].includes(p.obfs||''))throw new Error('Поддерживается только обфускация Salamander.');
+ if(Boolean(p.obfs)!==Boolean(p.obfs_password))throw new Error('Для Salamander укажите пароль обфускации.');
+ if(p.pin_sha256&&!/^[a-f0-9]{64}$/i.test(p.pin_sha256))throw new Error('SHA-256 сертификата должен содержать 64 hex-символа.');
+ if(p.alpn!==undefined){validateALPN(p.alpn,'tls');if(p.alpn.length&&(p.alpn.length!==1||p.alpn[0]!=='h3'))throw new Error('Hysteria2 поддерживает только ALPN h3.');}
+ if(p.uuid||p.public_key||p.short_id||p.flow||p.host||p.xhttp_extra!==undefined||!['','chrome'].includes(p.fingerprint)||!['','/'].includes(p.path)||!['','auto'].includes(p.xhttp_mode))throw new Error('Уберите параметры VLESS / XHTTP из профиля Hysteria2.');
+ return p;
+}
+export function parseProfileURI(value:string):ProbeProfile {
+ return /^(hysteria2|hy2):\/\//i.test(value.trim())?parseHysteria2(value):parseVless(value);
+}
+export function parseHysteria2(value:string):ProbeProfile {
+ let uri:URL;
+ try{uri=new URL(value.trim());}catch{throw new Error('Не удалось прочитать Hysteria2-ссылку. Используйте hysteria2://пароль@сервер:порт с одним портом.');}
+ if(!['hysteria2:','hy2:'].includes(uri.protocol)||!uri.hostname||!['','/'].includes(uri.pathname))throw new Error('Ожидается hysteria2://пароль@сервер:порт или hy2://пароль@сервер:порт.');
+ const q=uri.searchParams,allowed=new Set(['sni','obfs','obfs-password','insecure','pinSHA256','alpn']);
+ for(const key of new Set(q.keys())){
+  if(q.getAll(key).length>1)throw new Error(`Параметр ${key} указан несколько раз.`);
+  if(!allowed.has(key))throw new Error(`Параметр «${key}» не поддерживается профилем Hysteria2.`);
+ }
+ const pin=(q.get('pinSHA256')||'').replaceAll(':','').toLowerCase();
+ if(q.has('pinSHA256')&&!/^[a-f0-9]{64}$/.test(pin))throw new Error('SHA-256 сертификата должен содержать 64 hex-символа.');
+ if(q.has('insecure')&&!['0','1'].includes(q.get('insecure')!))throw new Error('Параметр insecure должен быть 0 или 1.');
+ if(q.get('insecure')==='1'&&!pin)throw new Error('Эта версия Xray требует проверки сертификата. Для самоподписанного сертификата добавьте pinSHA256.');
+ const authority=value.trim().split('://')[1].split(/[/?#]/)[0];
+ const userinfoEnd=authority.lastIndexOf('@');
+ const hasPassword=userinfoEnd>=0&&authority.slice(0,userinfoEnd).includes(':');
+ let password:string;
+ try{password=decodeURIComponent(uri.username)+(hasPassword?':'+decodeURIComponent(uri.password):'');}catch{throw new Error('Не удалось прочитать пароль Hysteria2.');}
+ const profile:ProbeProfile={...profileForProtocol(blankProfile(),'hysteria2'),port:Number(uri.port||443),password,server_name:q.get('sni')||uri.hostname};
+ if(q.has('obfs'))profile.obfs=q.get('obfs') as ProbeProfile['obfs'];
+ if(q.has('obfs-password'))profile.obfs_password=q.get('obfs-password')!;
+ if(pin)profile.pin_sha256=pin;
+ if(q.has('alpn')){const alpn=parseALPN(q.get('alpn')!,'tls');if(alpn)profile.alpn=alpn;}
+ return validateProfile(profile);
 }
 export function parseVless(value:string):ProbeProfile {
  let uri:URL;
