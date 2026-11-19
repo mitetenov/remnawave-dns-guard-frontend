@@ -26,6 +26,7 @@ type ReportError=(error:unknown)=>string;
 export function useServerOrders(active:boolean,onAuthError:ReportError){
  const [snapshot,setSnapshot]=useState<OrderSnapshot|null>(null);
  const [loading,setLoading]=useState(false),[error,setError]=useState('');
+ const [optionsRevision,setOptionsRevision]=useState(0);
  const activeRef=useRef(active),requestRef=useRef(0);
  activeRef.current=active;
 
@@ -47,7 +48,8 @@ export function useServerOrders(active:boolean,onAuthError:ReportError){
   return()=>{requestRef.current++;};
  },[active,reload]);
 
- return {snapshot,loading,error,reload};
+ const refreshOptions=()=>setOptionsRevision(revision=>revision+1);
+ return {snapshot,loading,error,reload,optionsRevision,refreshOptions};
 }
 
 function OrderError({message}:{message:string}){
@@ -140,14 +142,14 @@ function ServerOrderRow({order,stages,reload,onAuthError}:{order:ServerOrder;sta
  </li>;
 }
 
-export function ServerOrdersPage({snapshot,loading,error,reload,onAuthError}:ReturnType<typeof useServerOrders>&{onAuthError:ReportError}){
+export function ServerOrdersPage({snapshot,loading,error,reload,optionsRevision,refreshOptions,onAuthError}:ReturnType<typeof useServerOrders>&{onAuthError:ReportError}){
  const [ordering,setOrdering]=useState(()=>pendingServerOrder()!==null),[ordered,setOrdered]=useState(false);
  const orders=snapshot?.orders??[],pools=snapshot?.pools??[];
 
  return <div className="server-orders-page" aria-busy={loading}>
   {error&&<OrderError message={error}/>}
   {ordered&&<p className="notice success" role="status"><CheckCircle2 size={18}/>Заказ принят. Статус появится в истории заказов.</p>}
-  {ordering&&<ServerOrderWizard onClose={()=>setOrdering(false)} onOrdered={()=>{setOrdering(false);setOrdered(true);void reload(true);}} onAuthError={onAuthError}/>}
+  {ordering&&<ServerOrderWizard onClose={()=>setOrdering(false)} onOrdered={()=>{setOrdering(false);setOrdered(true);void reload(true);}} onAuthError={onAuthError} optionsRevision={optionsRevision} refreshOptions={refreshOptions}/>}
   <section className="panel" aria-labelledby="server-orders-title">
    <div className="panel-heading">
     <div><h2 id="server-orders-title">Заказы серверов</h2><p><a className="order-settings-link" href="#replacements">Подключение UpCloud и Ansible</a></p></div>

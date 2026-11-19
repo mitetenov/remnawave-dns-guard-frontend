@@ -5,7 +5,7 @@ import {api,ApiError,json} from './api';
 const steps=[
  {kind:'zone',label:'Локация',empty:'Нет доступных локаций UpCloud.'},
  {kind:'plan',label:'Тариф',empty:'В этой локации нет доступных тарифов Starter и Premium.'},
- {kind:'pool',label:'DNS-пул',empty:'Укажите шаблон домена и профиль проверок пула.'},
+ {kind:'pool',label:'DNS-пул',empty:'Нет доступных DNS-пулов. Сохраните шаблон для нужного пула ниже в блоке «Домены серверов» и настройте его профиль проверок в разделе «DNS-пулы».'},
  {kind:'group',label:'Тип узла',empty:'Нет доступных групп Ansible.'},
  {kind:'profile',label:'Профиль Remnawave',empty:'Для выбранного DNS-пула нет совместимых профилей. Проверьте, что хост Remnawave с адресом пула использует входящие подключения профиля.'},
 ] as const;
@@ -42,14 +42,13 @@ function storePending(order:PendingOrder|null,expectedID?:string){
  }catch{/* The current form still keeps the request ID. */}
 }
 
-export function ServerOrderWizard({onClose,onOrdered,onAuthError}:{onClose:()=>void;onOrdered:()=>void;onAuthError:(error:unknown)=>string}){
+export function ServerOrderWizard({onClose,onOrdered,onAuthError,optionsRevision,refreshOptions}:{onClose:()=>void;onOrdered:()=>void;onAuthError:(error:unknown)=>string;optionsRevision:number;refreshOptions:()=>void}){
  const [restored]=useState(pendingServerOrder);
  const [id]=useState(()=>restored?.id??requestID());
  const [selection,setSelection]=useState<Selection>(restored?.selection??{});
  const [planFamily,setPlanFamily]=useState('');
  const [step,setStep]=useState(restored?steps.length:0);
  const [options,setOptions]=useState<{key:string;choices:Choice[];error:string}|null>(null);
- const [revision,retryOptions]=useState(0);
  const [confirmed,setConfirmed]=useState(false),[pending,setPending]=useState(!!restored),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const sending=useRef(false),heading=useRef<HTMLHeadingElement>(null);
  const current=steps[step];
@@ -58,7 +57,7 @@ export function ServerOrderWizard({onClose,onOrdered,onAuthError}:{onClose:()=>v
  if(isPlan&&selection.zone)query.set('zone',selection.zone.id);
  if(current?.kind==='profile'&&selection.pool)query.set('pool_id',selection.pool.id);
  const requestKey=current?query.toString():'';
- const optionKey=`${requestKey}:${revision}`;
+ const optionKey=`${requestKey}:${optionsRevision}`;
  const result=options?.key===optionKey?options:null;
  const availableChoices=result?.choices??[];
  const availableFamilies=isPlan?planFamilies.filter(family=>availableChoices.some(choice=>choice.family===family.id)):[];
@@ -126,7 +125,7 @@ export function ServerOrderWizard({onClose,onOrdered,onAuthError}:{onClose:()=>v
    <h3 ref={heading} tabIndex={-1}>{current?current.label:'Проверьте заказ'}</h3>
    {current? <div className="order-step-body" aria-busy={!result}>
     {!result&&<p className="loading-label" role="status"><LoaderCircle className="spin" size={16}/>Загрузка вариантов…</p>}
-    {result?.error&&<><div className="error-box" role="alert"><TriangleAlert size={17}/><span>{result.error}</span></div><button type="button" className="button secondary" onClick={()=>retryOptions(value=>value+1)}>Загрузить варианты снова</button></>}
+    {result?.error&&<><div className="error-box" role="alert"><TriangleAlert size={17}/><span>{result.error}</span></div><button type="button" className="button secondary" onClick={refreshOptions}>Загрузить варианты снова</button></>}
     {result&&!result.error&&(hasChoices?<>
      {isPlan&&<label className="field">
       <span>Линейка тарифов</span>
@@ -142,7 +141,7 @@ export function ServerOrderWizard({onClose,onOrdered,onAuthError}:{onClose:()=>v
       </select>
       {isPlan&&chosen&&<small>{chosen.label}</small>}
      </label>}
-    </>:<><p className="field-help">{current.empty}</p><button type="button" className="button secondary" onClick={()=>retryOptions(value=>value+1)}>Обновить варианты</button></>)}
+    </>:<><p className="field-help" role="status">{current.empty}</p><button type="button" className="button secondary" onClick={refreshOptions}>Обновить варианты</button></>)}
    </div>:<>
     <dl className="order-details">
      {steps.map(({kind,label})=><div key={kind}><dt>{label}</dt><dd>{selection[kind]?.label}</dd></div>)}

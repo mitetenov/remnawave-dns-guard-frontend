@@ -187,6 +187,37 @@ describe('server ordering',()=>{
   expect(host.textContent).toContain('Заказы для пула выключены.');
  });
 
+ it('explains an empty pool list and refreshes the wizard from both buttons',async()=>{
+  const loadPoolOptions=vi.fn(()=>({choices:[] as {id:string;label:string}[]}));
+  mockOrders(path=>{
+   if(path==='/server-orders/options?kind=zone')return {choices:[{id:'fi-hel1',label:'Финляндия'}]};
+   if(path==='/server-orders/options?kind=plan&zone=fi-hel1')return {choices:[{id:'hel-plan',label:price,family:'starter'}]};
+   if(path==='/server-orders/options?kind=pool')return loadPoolOptions();
+   return {orders:[],pools:[pool],stages};
+  });
+  await act(async()=>root.render(<App/>));
+  await click('Заказать сервер');
+  await choose('fi-hel1');
+  await changeSelect('starter');
+  await choose('hel-plan','Тариф');
+
+  const wizard=host.querySelector('.order-wizard')!;
+  expect(wizard.textContent).toContain('Нет доступных DNS-пулов.');
+  expect(wizard.textContent).toContain('Домены серверов');
+  expect(wizard.textContent).toContain('профиль проверок');
+  expect(button('Продолжить').disabled).toBe(true);
+  await click('Обновить варианты');
+  expect(loadPoolOptions).toHaveBeenCalledTimes(2);
+  expect(wizard.textContent).toContain('Нет доступных DNS-пулов.');
+
+  loadPoolOptions.mockReturnValue({choices:[{id:pool.id,label:pool.name}]});
+  await click('Обновить');
+  expect(loadPoolOptions).toHaveBeenCalledTimes(3);
+  expect(wizard.textContent).not.toContain('Нет доступных DNS-пулов.');
+  await changeSelect(pool.id,'DNS-пул');
+  expect(button('Продолжить').disabled).toBe(false);
+ });
+
  it('refreshes order status and requires explicit confirmation for cancel and retry',async()=>{
   let orders=[{...job,can_cancel:true,can_retry_create:false}];
   mockOrders((path,options)=>{
