@@ -85,6 +85,17 @@ describe('automatic replacement settings',()=>{
   expect(container.innerHTML).not.toContain('secret-only-input');
  });
 
+ it('shows bundled Ansible readiness for purchased nodes independently of manual bindings',async()=>{
+  mockRequests(()=>({
+   ...snapshot,order_ansible_ready:true,order_ansible_error:'',
+   targets:[{...configuredTarget,order_managed:true},{...configuredTarget,id:'manual',name:'Ручной узел'}],
+  }));
+  await render();
+  const bindings=container.querySelectorAll('.replacement-target summary');
+  expect(bindings[0]?.textContent).toContain('Включена');
+  expect(bindings[1]?.textContent).toContain('Ожидает настройки');
+ });
+
  it('requires an explicit server binding and opt-in, and displays the API error',async()=>{
   let value=snapshot;
   let reject=true;

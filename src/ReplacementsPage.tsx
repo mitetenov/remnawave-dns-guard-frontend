@@ -13,6 +13,7 @@ interface ReplacementTarget {
  enabled:boolean;
  pool_enabled:boolean;
  manual_enabled:boolean;
+ order_managed?:boolean;
  blocked_since:string|null;
 }
 
@@ -34,6 +35,8 @@ interface ReplacementSnapshot {
  upcloud_configured:boolean;
  ansible_ready:boolean;
  ansible_error:string;
+ order_ansible_ready?:boolean;
+ order_ansible_error?:string;
  targets:ReplacementTarget[];
  jobs:ReplacementJob[];
 }
@@ -128,8 +131,15 @@ function ReplacementSettings({snapshot,save,onAuthError}:{snapshot:ReplacementSn
     {saved&&<div className="inline-success" role="status"><CheckCircle2 size={16}/>Токен UpCloud сохранён.</div>}
    </form>
    <div className="settings-section">
+    {snapshot.order_ansible_ready!==undefined&&<div className="replacement-order-readiness">
+     <div className="settings-section-header">
+      <h3>Ansible для заказанных узлов</h3>
+      <Badge tone={snapshot.order_ansible_ready?'green':'amber'} label={snapshot.order_ansible_ready?'Готов':'Требуется настройка'}/>
+     </div>
+     {snapshot.order_ansible_error&&<ErrorMessage message={snapshot.order_ansible_error}/>}
+    </div>}
     <div className="settings-section-header">
-     <h3>Ansible</h3>
+     <h3>{snapshot.order_ansible_ready===undefined?'Ansible':'Ansible для узлов с ручной привязкой'}</h3>
      <Badge tone={snapshot.ansible_ready?'green':'amber'} label={snapshot.ansible_ready?'Готов':'Требуется настройка'}/>
     </div>
     {snapshot.ansible_error&&<ErrorMessage message={snapshot.ansible_error}/>}
@@ -281,7 +291,10 @@ export function ReplacementsPage({snapshot,loading,error,reload,onAuthError}:Ret
    <ReplacementSettings snapshot={snapshot} save={save} onAuthError={onAuthError}/>
    <section className="panel">
     <div className="panel-heading"><div><h2>Привязки узлов</h2><p>Укажите UUID сервера UpCloud и узла Remnawave для каждой привязки.</p></div></div>
-    {targets.length?targets.map(target=><TargetBinding key={target.id} target={target} locked={lockedTargets.has(target.id)} ready={snapshot.upcloud_configured&&snapshot.ansible_ready} save={save} onAuthError={onAuthError}/>):<p className="replacement-empty">Добавьте узел в разделе «DNS-пулы», чтобы настроить автозамену.</p>}
+    {targets.length?targets.map(target=>{
+     const ansibleReady=target.order_managed?(snapshot.order_ansible_ready??snapshot.ansible_ready):snapshot.ansible_ready;
+     return <TargetBinding key={target.id} target={target} locked={lockedTargets.has(target.id)} ready={snapshot.upcloud_configured&&ansibleReady} save={save} onAuthError={onAuthError}/>;
+    }):<p className="replacement-empty">Добавьте узел в разделе «DNS-пулы», чтобы настроить автозамену.</p>}
    </section>
   </>}
  </div>;
