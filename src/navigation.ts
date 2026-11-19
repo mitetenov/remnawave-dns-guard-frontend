@@ -1,4 +1,4 @@
-export const pageNames = {overview:'Обзор',pools:'DNS-пулы',agents:'Агенты',events:'Журнал событий',settings:'Настройки'} as const;
+export const pageNames = {overview:'Обзор',pools:'DNS-пулы',servers:'Серверы',replacements:'Автозамена',agents:'Агенты',events:'Журнал событий',settings:'Настройки'} as const;
 export type Page = keyof typeof pageNames;
 
 export function pageFromHash(hash:string):Page {
