@@ -63,6 +63,7 @@
 .replacement-readiness,.replacement-binding-fields {display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
 .replacement-readiness>.settings-section {min-width:0;border-bottom:0}
 .replacement-readiness>.settings-section+.settings-section {border-left:1px solid var(--border)}
+.replacement-order-readiness {padding-bottom:16px;margin-bottom:16px;border-bottom:1px solid var(--border)}
 .replacement-readiness .error-box,.replacement-binding .error-box {margin:15px 0 0}
 .replacement-readiness .inline-success,.replacement-binding .inline-success {margin-bottom:0}
 .replacement-empty {padding:20px 22px;color:#91a2b9;font-size:12px;line-height:1.7}
