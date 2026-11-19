@@ -34,10 +34,10 @@ export function pendingServerOrder():PendingOrder|null{
  return null;
 }
 
-function storePending(order:PendingOrder|null){
+function storePending(order:PendingOrder|null,expectedID?:string){
  try{
   if(order)sessionStorage.setItem(pendingKey,JSON.stringify(order));
-  else sessionStorage.removeItem(pendingKey);
+  else if(!expectedID||pendingServerOrder()?.id===expectedID)sessionStorage.removeItem(pendingKey);
  }catch{/* The current form still keeps the request ID. */}
 }
 
@@ -95,11 +95,11 @@ export function ServerOrderWizard({onClose,onOrdered,onAuthError}:{onClose:()=>v
   try{
    const value=await api<{id:string}>('/server-orders',json('POST',{request_id:id,zone:zone.id,plan:plan.id,pool_id:pool.id,group:group.id,profile_id:profile.id}));
    if(!value?.id)throw new Error('Подтверждение заказа не получено.');
-   storePending(null);onOrdered();
+   storePending(null,id);onOrdered();
   }catch(error){
-   const unknownResult=!(error instanceof ApiError)||error.status===0||error.status>=500;
+   const unknownResult=!(error instanceof ApiError)||[0,408,429].includes(error.status)||error.status>=500||(pending&&error.status===401);
    setPending(unknownResult);
-   if(!unknownResult)storePending(null);
+   if(!unknownResult)storePending(null,id);
    setError(onAuthError(error));
   }finally{sending.current=false;setBusy(false);}
  }

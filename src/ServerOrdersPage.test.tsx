@@ -29,6 +29,7 @@ afterEach(async()=>{
 function mockOrders(handle:(path:string,options?:RequestInit)=>unknown){
  vi.mocked(api).mockImplementation(async <T,>(path:string,options?:RequestInit)=>{
   if(path==='/auth/me')return {username:'admin'} as T;
+  if(path==='/auth/login')return {username:'admin'} as T;
   if(path==='/settings'||path==='/overview')return {} as T;
   if(path.startsWith('/server-orders'))return await handle(path,options) as T;
   return [] as T;
@@ -74,6 +75,7 @@ describe('server ordering',()=>{
    if(options?.method==='POST'){
     post.push(JSON.parse(String(options.body)));
     if(post.length===1)throw new ApiError(0,'Ответ потерян.');
+    if(post.length===2)throw new ApiError(401,'Сессия завершена.');
     return {id:job.id};
    }
    if(path.startsWith('/server-orders/options?'))return {choices:choices[path.split('?')[1]]};
@@ -120,12 +122,23 @@ describe('server ordering',()=>{
   await act(async()=>host.querySelector<HTMLInputElement>('.order-wizard input[type="checkbox"]')?.click());
   await click('Повторить запрос заказа');
   expect(post).toHaveLength(2);
+  const pendingId=post[0]&& (post[0] as {request_id:string}).request_id;
+  expect(JSON.parse(sessionStorage.getItem('dns-guard:pending-server-order')||'null')).toMatchObject({id:pendingId});
+  expect(host.querySelector('.auth-page')).toBeTruthy();
+  await type(host.querySelector<HTMLInputElement>('input[autocomplete="username"]')!,'admin');
+  await type(host.querySelector<HTMLInputElement>('input[autocomplete="current-password"]')!,'password');
+  await click('Войти в панель');
+  expect(host.textContent).toContain('При повторе будет отправлен тот же заказ.');
+  await act(async()=>host.querySelector<HTMLInputElement>('.order-wizard input[type="checkbox"]')?.click());
+  await click('Повторить запрос заказа');
+  expect(post).toHaveLength(3);
   expect(post[0]).toEqual({request_id:expect.stringMatching(/^[0-9a-f-]{36}$/),zone:'fi-hel1',plan:'hel-opaque-price-quote',pool_id:'pool-2',group:'nodes_wl',profile_id:'profile-2'});
   expect(post[1]).toEqual(post[0]);
+  expect(post[2]).toEqual(post[0]);
   expect(host.textContent).toContain('Заказ принят.');
   expect(host.textContent).toContain(job.domain);
   expect(sessionStorage.length).toBe(0);
- });
+ },20000);
 
  it('validates, previews and clears the template for a specific pool',async()=>{
   let template=pool.domain_template;
