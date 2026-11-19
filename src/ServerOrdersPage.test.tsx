@@ -76,8 +76,8 @@ describe('server ordering',()=>{
    ],
    ['kind=pool']:[{id:pool.id,label:pool.name},{id:'pool-2',label:'Резервный'}],
    ['kind=group']:[{id:'nodes_wl',label:'CDN'}],
-   ['kind=profile&pool_id=pool-1']:[{id:'profile-1',label:'VLESS'}],
-   ['kind=profile&pool_id=pool-2']:[{id:'profile-1',label:'VLESS'},{id:'profile-2',label:'Hysteria'}],
+   ['kind=profile&pool_id=pool-1&group=nodes_wl']:[{id:'profile-1',label:'VLESS'}],
+   ['kind=profile&pool_id=pool-2&group=nodes_wl']:[{id:'profile-1',label:'VLESS'},{id:'profile-2',label:'Hysteria'}],
   };
   mockOrders((path,options)=>{
    if(options?.method==='POST'){
@@ -185,6 +185,27 @@ describe('server ordering',()=>{
   await act(async()=>save.click());
   expect(api).toHaveBeenCalledWith(`/server-orders/pools/${pool.id}`,json('PUT',{domain_template:''}));
   expect(host.textContent).toContain('Заказы для пула выключены.');
+ });
+
+ it('shows the selected node type configuration error before payment confirmation',async()=>{
+  mockOrders(path=>{
+   if(path==='/server-orders/options?kind=zone')return {choices:[{id:'fi-hel1',label:'Финляндия'}]};
+   if(path==='/server-orders/options?kind=plan&zone=fi-hel1')return {choices:[{id:'hel-plan',label:price,family:'starter'}]};
+   if(path==='/server-orders/options?kind=pool')return {choices:[{id:pool.id,label:pool.name}]};
+   if(path==='/server-orders/options?kind=group')return {choices:[{id:'nodes_wl',label:'CDN'}]};
+   if(path==='/server-orders/options?kind=profile&pool_id=pool-1&group=nodes_wl')throw new ApiError(409,'Укажите REPLACEMENT_ANSIBLE_XHTTP_PATH.');
+   return {orders:[],pools:[pool],stages};
+  });
+  await act(async()=>root.render(<App/>));
+  await click('Заказать сервер');
+  await choose('fi-hel1');
+  await changeSelect('starter');
+  await choose('hel-plan','Тариф');
+  await choose(pool.id);
+  await choose('nodes_wl');
+  expect(host.querySelector('.order-wizard [role="alert"]')?.textContent).toContain('REPLACEMENT_ANSIBLE_XHTTP_PATH');
+  expect(host.querySelector('.order-confirm')).toBeNull();
+  expect(button('Продолжить').disabled).toBe(true);
  });
 
  it('explains an empty pool list and refreshes the wizard from both buttons',async()=>{
