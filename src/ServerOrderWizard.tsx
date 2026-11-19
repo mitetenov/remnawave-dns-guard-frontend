@@ -4,13 +4,14 @@ import {api,ApiError,json} from './api';
 
 const steps=[
  {kind:'zone',label:'Локация',empty:'Нет доступных локаций UpCloud.'},
- {kind:'plan',label:'Тариф',empty:'В этой локации нет доступных тарифов.'},
+ {kind:'plan',label:'Тариф',empty:'В этой локации нет доступных тарифов Starter и Premium.'},
  {kind:'pool',label:'DNS-пул',empty:'Укажите шаблон домена и профиль проверок пула.'},
  {kind:'group',label:'Тип узла',empty:'Нет доступных групп Ansible.'},
  {kind:'profile',label:'Профиль Remnawave',empty:'Для выбранного DNS-пула нет совместимых профилей. Проверьте, что хост Remnawave с адресом пула использует входящие подключения профиля.'},
 ] as const;
 type Kind=typeof steps[number]['kind'];
-type Choice={id:string;label:string};
+const planFamilies=[{id:'starter',label:'Starter'},{id:'premium',label:'Premium'}] as const;
+type Choice={id:string;label:string;family?:typeof planFamilies[number]['id']};
 type Selection=Partial<Record<Kind,Choice>>;
 type PendingOrder={id:string;selection:Selection};
 const pendingKey='dns-guard:pending-server-order';
@@ -45,19 +46,26 @@ export function ServerOrderWizard({onClose,onOrdered,onAuthError}:{onClose:()=>v
  const [restored]=useState(pendingServerOrder);
  const [id]=useState(()=>restored?.id??requestID());
  const [selection,setSelection]=useState<Selection>(restored?.selection??{});
+ const [planFamily,setPlanFamily]=useState('');
  const [step,setStep]=useState(restored?steps.length:0);
  const [options,setOptions]=useState<{key:string;choices:Choice[];error:string}|null>(null);
  const [revision,retryOptions]=useState(0);
  const [confirmed,setConfirmed]=useState(false),[pending,setPending]=useState(!!restored),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const sending=useRef(false),heading=useRef<HTMLHeadingElement>(null);
  const current=steps[step];
+ const isPlan=current?.kind==='plan';
  const query=new URLSearchParams({kind:current?.kind??''});
- if(current?.kind==='plan'&&selection.zone)query.set('zone',selection.zone.id);
+ if(isPlan&&selection.zone)query.set('zone',selection.zone.id);
  if(current?.kind==='profile'&&selection.pool)query.set('pool_id',selection.pool.id);
  const requestKey=current?query.toString():'';
  const optionKey=`${requestKey}:${revision}`;
  const result=options?.key===optionKey?options:null;
- const chosen=current?result?.choices.find(choice=>choice.id===selection[current.kind]?.id):null;
+ const availableChoices=result?.choices??[];
+ const availableFamilies=isPlan?planFamilies.filter(family=>availableChoices.some(choice=>choice.family===family.id)):[];
+ const selectedFamily=availableFamilies.find(family=>family.id===planFamily);
+ const choices=isPlan?availableChoices.filter(choice=>choice.family===planFamily):availableChoices;
+ const hasChoices=isPlan?availableFamilies.length>0:choices.length>0;
+ const chosen=current?choices.find(choice=>choice.id===selection[current.kind]?.id):null;
  const complete=steps.every(({kind})=>!!selection[kind]?.id);
 
  useEffect(()=>{
@@ -76,6 +84,7 @@ export function ServerOrderWizard({onClose,onOrdered,onAuthError}:{onClose:()=>v
  useEffect(()=>{heading.current?.focus();},[step]);
 
  function select(kind:Kind,next:Choice|undefined){
+  if(kind==='zone'&&selection.zone?.id!==next?.id)setPlanFamily('');
   setSelection(previous=>{
    const updated={...previous,[kind]:next};
    if(kind==='zone'&&previous.zone?.id!==next?.id)delete updated.plan;
@@ -118,13 +127,22 @@ export function ServerOrderWizard({onClose,onOrdered,onAuthError}:{onClose:()=>v
    {current? <div className="order-step-body" aria-busy={!result}>
     {!result&&<p className="loading-label" role="status"><LoaderCircle className="spin" size={16}/>Загрузка вариантов…</p>}
     {result?.error&&<><div className="error-box" role="alert"><TriangleAlert size={17}/><span>{result.error}</span></div><button type="button" className="button secondary" onClick={()=>retryOptions(value=>value+1)}>Загрузить варианты снова</button></>}
-    {result&&!result.error&&(result.choices.length?<label className="field">
-     <select aria-label={current.label} value={chosen?.id??''} onChange={event=>select(current.kind,result.choices.find(choice=>choice.id===event.target.value))}>
-      <option value="" disabled>Выберите вариант</option>
-      {result.choices.map(choice=><option key={choice.id} value={choice.id}>{choice.label}</option>)}
-     </select>
-     {current.kind==='plan'&&chosen&&<small>{chosen.label}</small>}
-    </label>:<><p className="field-help">{current.empty}</p><button type="button" className="button secondary" onClick={()=>retryOptions(value=>value+1)}>Обновить варианты</button></>)}
+    {result&&!result.error&&(hasChoices?<>
+     {isPlan&&<label className="field">
+      <span>Линейка тарифов</span>
+      <select value={selectedFamily?.id??''} onChange={event=>{setPlanFamily(event.target.value);select('plan',undefined);}}>
+       <option value="" disabled>Выберите линейку</option>
+       {availableFamilies.map(family=><option key={family.id} value={family.id}>{family.label}</option>)}
+      </select>
+     </label>}
+     {(!isPlan||selectedFamily)&&<label className="field">
+      <select aria-label={current.label} value={chosen?.id??''} onChange={event=>select(current.kind,choices.find(choice=>choice.id===event.target.value))}>
+       <option value="" disabled>{isPlan?'Выберите конфигурацию':'Выберите вариант'}</option>
+       {choices.map(choice=><option key={choice.id} value={choice.id}>{choice.label}</option>)}
+      </select>
+      {isPlan&&chosen&&<small>{chosen.label}</small>}
+     </label>}
+    </>:<><p className="field-help">{current.empty}</p><button type="button" className="button secondary" onClick={()=>retryOptions(value=>value+1)}>Обновить варианты</button></>)}
    </div>:<>
     <dl className="order-details">
      {steps.map(({kind,label})=><div key={kind}><dt>{label}</dt><dd>{selection[kind]?.label}</dd></div>)}
