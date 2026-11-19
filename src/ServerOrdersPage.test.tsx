@@ -10,7 +10,8 @@ vi.mock('./api',async importOriginal=>({...await importOriginal<typeof import('.
 const pool={id:'pool-1',name:'Основной',hostname:'vpn.example.net',domain_template:'{country}-{n}.{pool}'};
 const stages={provision:'Создание сервера',complete:'Готов',cancelled:'Отменён'};
 const job={id:'job-1',domain:'fi-12.vpn.example.net',stage:'provision',zone:'fi-hel1',plan:'1xCPU-1GB',pool_hostname:pool.hostname,group_name:'CDN',profile_name:'VLESS',created_at:'2026-11-19T12:00:00Z',ip:null,error:null};
-const price='1 vCPU · 1 ГБ · 10 ГБ · 4,00 €/мес.';
+const price='≈ 4.00 EUR/мес. · STARTER-1xCPU-1GB · 1 vCPU · 1024 МиБ RAM · 10 ГиБ standard · 0.00595238 EUR/ч';
+const premiumPrice='≈ 5.00 EUR/мес. · PREMIUM-1xCPU-1GB · 1 vCPU · 1024 МиБ RAM · 25 ГиБ maxiops · 0.00744048 EUR/ч';
 let host:HTMLDivElement,root:Root;
 
 beforeEach(()=>{
@@ -44,13 +45,17 @@ function button(text:string){
 
 async function click(text:string){await act(async()=>button(text).click());}
 
-async function changeSelect(value:string){
- const select=host.querySelector<HTMLSelectElement>('.order-wizard select')!;
+function wizardSelect(label?:string){
+ return host.querySelector<HTMLSelectElement>(label?`.order-wizard select[aria-label="${label}"]`:'.order-wizard select');
+}
+
+async function changeSelect(value:string,label?:string){
+ const select=wizardSelect(label)!;
  expect(select).toBeTruthy();
  await act(async()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});
 }
 
-async function choose(value:string){await changeSelect(value);await click('Продолжить');}
+async function choose(value:string,label?:string){await changeSelect(value,label);await click('Продолжить');}
 
 async function type(input:HTMLInputElement,value:string){
  await act(async()=>{
@@ -60,12 +65,15 @@ async function type(input:HTMLInputElement,value:string){
 }
 
 describe('server ordering',()=>{
- it('opens from the sidebar route, refreshes quoted tariffs by zone and reuses one request after a lost response',async()=>{
+ it('filters tariffs by location and family, confirms both prices and reuses the request after session expiry',async()=>{
   const post:unknown[]=[];
-  const choices:Record<string,{id:string;label:string}[]>={
+  const choices:Record<string,{id:string;label:string;family?:string}[]>={
    ['kind=zone']:[{id:'nl-ams1',label:'Нидерланды · Амстердам'},{id:'fi-hel1',label:'Финляндия · Хельсинки'}],
-   ['kind=plan&zone=nl-ams1']:[{id:'ams-opaque',label:'2 vCPU · 9 €/мес.'}],
-   ['kind=plan&zone=fi-hel1']:[{id:'hel-opaque-price-quote',label:price}],
+   ['kind=plan&zone=nl-ams1']:[{id:'ams-opaque',label:'PREMIUM-1xCPU-2GB · ≈ 12.00 EUR/мес.',family:'premium'}],
+   ['kind=plan&zone=fi-hel1']:[
+    {id:'hel-opaque-price-quote',label:price,family:'starter'},
+    {id:'hel-opaque-premium',label:premiumPrice,family:'premium'},
+   ],
    ['kind=pool']:[{id:pool.id,label:pool.name},{id:'pool-2',label:'Резервный'}],
    ['kind=group']:[{id:'nodes_wl',label:'CDN'}],
    ['kind=profile&pool_id=pool-1']:[{id:'profile-1',label:'VLESS'}],
@@ -86,14 +94,32 @@ describe('server ordering',()=>{
   expect(host.querySelector('nav [aria-current="page"]')?.textContent).toBe('Серверы');
   await click('Заказать сервер');
   await choose('nl-ams1');
-  await choose('ams-opaque');
+  expect(wizardSelect()?.textContent).toContain('Premium');
+  expect(wizardSelect()?.textContent).not.toContain('Starter');
+  expect(wizardSelect('Тариф')).toBeNull();
+  await changeSelect('premium');
+  await choose('ams-opaque','Тариф');
   await click('Назад');
+  expect(wizardSelect()?.value).toBe('premium');
+  expect(wizardSelect('Тариф')?.value).toBe('ams-opaque');
   await click('Назад');
   await choose('fi-hel1');
+  expect(wizardSelect()?.value).toBe('');
+  expect(wizardSelect('Тариф')).toBeNull();
+  await changeSelect('premium');
+  expect(wizardSelect('Тариф')?.textContent).toContain(premiumPrice);
+  expect(wizardSelect('Тариф')?.textContent).not.toContain('STARTER-1xCPU-1GB');
+  expect(wizardSelect('Тариф')?.textContent).not.toContain('12.00 EUR/мес.');
+  await changeSelect('hel-opaque-premium','Тариф');
+  expect(button('Продолжить').disabled).toBe(false);
+  await changeSelect('starter');
   expect(button('Продолжить').disabled).toBe(true);
-  expect(host.querySelector('.order-wizard select')?.textContent).toContain(price);
-  expect(host.querySelector('.order-wizard select')?.textContent).not.toContain('9 €/мес.');
-  await choose('hel-opaque-price-quote');
+  expect(wizardSelect('Тариф')?.textContent).toContain(price);
+  expect(wizardSelect('Тариф')?.textContent).not.toContain('PREMIUM-1xCPU-1GB');
+  await changeSelect('premium');
+  expect(wizardSelect('Тариф')?.value).toBe('');
+  await changeSelect('starter');
+  await choose('hel-opaque-price-quote','Тариф');
   await choose(pool.id);
   await choose('nodes_wl');
   await choose('profile-1');
