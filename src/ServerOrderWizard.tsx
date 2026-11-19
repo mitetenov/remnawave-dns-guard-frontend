@@ -55,7 +55,10 @@ export function ServerOrderWizard({onClose,onOrdered,onAuthError,optionsRevision
  const isPlan=current?.kind==='plan';
  const query=new URLSearchParams({kind:current?.kind??''});
  if(isPlan&&selection.zone)query.set('zone',selection.zone.id);
- if(current?.kind==='profile'&&selection.pool)query.set('pool_id',selection.pool.id);
+ if(current?.kind==='profile'){
+  if(selection.pool)query.set('pool_id',selection.pool.id);
+  if(selection.group)query.set('group',selection.group.id);
+ }
  const requestKey=current?query.toString():'';
  const optionKey=`${requestKey}:${optionsRevision}`;
  const result=options?.key===optionKey?options:null;
@@ -88,6 +91,7 @@ export function ServerOrderWizard({onClose,onOrdered,onAuthError,optionsRevision
    const updated={...previous,[kind]:next};
    if(kind==='zone'&&previous.zone?.id!==next?.id)delete updated.plan;
    if(kind==='pool'&&previous.pool?.id!==next?.id)delete updated.profile;
+   if(kind==='group'&&previous.group?.id!==next?.id)delete updated.profile;
    return updated;
   });
  }
