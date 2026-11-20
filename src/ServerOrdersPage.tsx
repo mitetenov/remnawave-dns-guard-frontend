@@ -1,7 +1,7 @@
 import {useCallback,useEffect,useRef,useState,type FormEvent} from 'react';
-import {Check,CheckCircle2,LoaderCircle,Server,ServerCog,TriangleAlert} from 'lucide-react';
+import {ArrowUpRight,Check,CheckCircle2,LoaderCircle,Server,ServerCog,TriangleAlert} from 'lucide-react';
 import {api,json} from './api';
-import {pendingServerOrder,ServerOrderWizard} from './ServerOrderWizard';
+import {orderProviderNames,pendingServerOrder,ServerOrderWizard,type OrderProvider} from './ServerOrderWizard';
 import './serverOrders.css';
 
 interface ServerOrder {
@@ -11,6 +11,7 @@ interface ServerOrder {
  error:string|null;
  zone:string;
  plan:string;
+ provider?:OrderProvider;
  created_at:string;
  ip:string|null;
  pool_hostname:string;
@@ -20,7 +21,7 @@ interface ServerOrder {
  can_retry_create?:boolean;
 }
 interface OrderPool {id:string;name:string;hostname:string;domain_template:string|null}
-interface OrderSnapshot {orders:ServerOrder[];pools:OrderPool[];stages:Record<string,string>}
+interface OrderSnapshot {orders:ServerOrder[];pools:OrderPool[];stages:Record<string,string>;virtua_configured?:boolean}
 type ReportError=(error:unknown)=>string;
 
 export function useServerOrders(active:boolean,onAuthError:ReportError){
@@ -100,6 +101,8 @@ function ServerOrderRow({order,stages,reload,onAuthError}:{order:ServerOrder;sta
  const canCancel=!!order.can_cancel,canRetry=!!order.can_retry_create;
  const showConfirmation=(confirmation==='cancel'&&canCancel)||(confirmation==='retry-create'&&canRetry);
  const tone=order.error||order.stage==='rejected'?'red':order.stage==='complete'?'green':order.stage==='cancelled'?'muted':'blue';
+ const provider=order.provider??'upcloud';
+ const providerName=orderProviderNames[provider];
  const groupName=order.group_name==='nodes'?'Обычная нода':order.group_name==='nodes_wl'?'Нода за CDN':order.group_name;
 
  async function actOnOrder(){
@@ -118,6 +121,7 @@ function ServerOrderRow({order,stages,reload,onAuthError}:{order:ServerOrder;sta
    <span className={`badge ${tone}`}><span className="badge-dot"/>{Object.hasOwn(stages,order.stage)?stages[order.stage]:order.stage}</span>
   </div>
   <dl className="order-details">
+   <div><dt>Хостинг</dt><dd>{providerName}</dd></div>
    <div><dt>Локация</dt><dd>{order.zone}</dd></div>
    <div><dt>Тариф</dt><dd>{order.plan}</dd></div>
    <div><dt>Тип узла</dt><dd>{groupName}</dd></div>
@@ -127,8 +131,8 @@ function ServerOrderRow({order,stages,reload,onAuthError}:{order:ServerOrder;sta
   </dl>
   {order.error&&<OrderError message={order.error}/>}
   {showConfirmation&&<div className="server-order-confirmation">
-   <p>{confirmation==='cancel'?'Отменить заказ на создание сервера?':'Проверьте список серверов и журнал действий UpCloud. Убедитесь, что сервер по этому заказу отсутствует и запрос на его создание больше не выполняется.'}</p>
-   {confirmation==='retry-create'&&<p>Метка в UpCloud <code>dns-guard-order={order.id}</code></p>}
+   <p>{confirmation==='cancel'?'Отменить заказ на создание сервера?':`Проверьте список серверов и журнал действий ${providerName}. Убедитесь, что сервер по этому заказу отсутствует и запрос на его создание больше не выполняется.`}</p>
+   {confirmation==='retry-create'&&(provider==='virtua'?<p>Имя сервера в Virtua.Cloud <code>dns-guard-{order.id}</code></p>:<p>Метка в UpCloud <code>dns-guard-order={order.id}</code></p>)}
    <div className="server-order-actions">
     <button type="button" className="button secondary" disabled={busy} onClick={()=>setConfirmation(null)}>Назад</button>
     <button type="button" className="button danger" disabled={busy} onClick={()=>void actOnOrder()}>{busy&&<LoaderCircle className="spin" size={16}/>} {confirmation==='cancel'?'Да, отменить заказ':'Подтвердить отсутствие и повторить'}</button>
@@ -142,18 +146,65 @@ function ServerOrderRow({order,stages,reload,onAuthError}:{order:ServerOrder;sta
  </li>;
 }
 
+function VirtuaTokenForm({configured,onSaved,onAuthError}:{configured:boolean;onSaved:()=>Promise<void>;onAuthError:ReportError}){
+ const [token,setToken]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState(false);
+
+ async function submit(event:FormEvent){
+  event.preventDefault();
+  const value=token.trim();
+  if(busy||!value)return;
+  setBusy(true);setError('');setSaved(false);
+  try{
+   await api('/server-orders/settings/virtua',json('PUT',{virtua_token:value}));
+   setToken('');setSaved(true);
+   await onSaved();
+  }catch(error){setError(onAuthError(error).replaceAll(value,'•••'));}
+  finally{setBusy(false);}
+ }
+
+ return <details className="virtua-settings">
+  <summary>{configured?'Заменить API-токен Virtua.Cloud':'Подключить Virtua.Cloud'}</summary>
+  <form onSubmit={submit}>
+   <label className="field"><span>API-токен Virtua.Cloud</span><input type="password" autoComplete="new-password" value={token} onChange={event=>{setToken(event.target.value);setError('');setSaved(false);}} disabled={busy}/></label>
+   <button className="button secondary" disabled={busy||!token.trim()}>{busy?<LoaderCircle className="spin" size={16}/>:<Check size={16}/>}Сохранить токен</button>
+   {error&&<OrderError message={error}/>}
+   {saved&&<p className="inline-success" role="status"><CheckCircle2 size={16}/>Токен Virtua.Cloud сохранён.</p>}
+  </form>
+ </details>;
+}
+
 export function ServerOrdersPage({snapshot,loading,error,reload,optionsRevision,refreshOptions,onAuthError}:ReturnType<typeof useServerOrders>&{onAuthError:ReportError}){
- const [ordering,setOrdering]=useState(()=>pendingServerOrder()!==null),[ordered,setOrdered]=useState(false);
+ const pending=pendingServerOrder();
+ const pendingProvider=pending?(pending.provider??'upcloud'):null;
+ const [ordering,setOrdering]=useState<OrderProvider|null>(pendingProvider),[ordered,setOrdered]=useState(false);
+ const virtuaConfigured=!!snapshot?.virtua_configured;
+
+ function order(provider:OrderProvider){setOrdered(false);setOrdering(provider);}
  const orders=snapshot?.orders??[],pools=snapshot?.pools??[];
 
  return <div className="server-orders-page" aria-busy={loading}>
   {error&&<OrderError message={error}/>}
   {ordered&&<p className="notice success" role="status"><CheckCircle2 size={18}/>Заказ принят. Статус появится в истории заказов.</p>}
-  {ordering&&<ServerOrderWizard onClose={()=>setOrdering(false)} onOrdered={()=>{setOrdering(false);setOrdered(true);void reload(true);}} onAuthError={onAuthError} optionsRevision={optionsRevision} refreshOptions={refreshOptions}/>}
+  {ordering?<ServerOrderWizard provider={ordering} onClose={()=>setOrdering(null)} onOrdered={()=>{setOrdering(null);setOrdered(true);void reload(true);}} onAuthError={onAuthError} optionsRevision={optionsRevision} refreshOptions={refreshOptions}/>:<section className="panel" aria-labelledby="server-hostings-title">
+   <div className="panel-heading"><h2 id="server-hostings-title">Доступные хостинги</h2></div>
+   <ul className="server-hostings-list">
+    <li>
+     <div><h3>UpCloud</h3><p>Заказ через DNS Guard</p></div>
+     <button className="button primary" disabled={pendingProvider==='virtua'} onClick={()=>order('upcloud')}><ServerCog size={17}/>{pendingProvider==='upcloud'?'Проверить отправку заказа':'Заказать сервер'}</button>
+    </li>
+    <li>
+     <div><h3>Virtua.Cloud</h3><p>Почасовой заказ через DNS Guard</p></div>
+     <div className="virtua-actions">
+      <a className="button secondary" href="https://virtua.cloud/" target="_blank" rel="noopener noreferrer">Открыть Virtua.Cloud<ArrowUpRight size={16} aria-hidden="true"/></a>
+      {(virtuaConfigured||pendingProvider==='virtua')&&<button className="button primary" disabled={pendingProvider==='upcloud'} onClick={()=>order('virtua')}><ServerCog size={17}/>{pendingProvider==='virtua'?'Проверить отправку заказа Virtua.Cloud':'Заказать сервер Virtua.Cloud'}</button>}
+     </div>
+     {snapshot&&<VirtuaTokenForm configured={virtuaConfigured} onSaved={()=>reload(true)} onAuthError={onAuthError}/>}
+    </li>
+   </ul>
+  </section>}
   <section className="panel" aria-labelledby="server-orders-title">
    <div className="panel-heading">
     <div><h2 id="server-orders-title">Заказы серверов</h2><p><a className="order-settings-link" href="#replacements">Подключение UpCloud и Ansible</a></p></div>
-    {!ordering&&<button className="button primary" onClick={()=>{setOrdered(false);setOrdering(true);}}><ServerCog size={17}/>{pendingServerOrder()?'Проверить отправку заказа':'Заказать сервер'}</button>}
    </div>
    {!snapshot?loading&&<div className="panel-loading" role="status"><span className="loading-label"><LoaderCircle className="spin" size={17}/>Загрузка заказов…</span></div>:orders.length?
     <ul className="server-orders-list">{orders.map(order=><ServerOrderRow key={order.id} order={order} stages={snapshot.stages} reload={reload} onAuthError={onAuthError}/>)}</ul>:

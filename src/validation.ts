@@ -1,5 +1,6 @@
 // Use the field labels from the Russian UI, rather than API property names.
 const fieldLabels:Readonly<Record<string,string>>={
+ virtua_token:'API-токен Virtua.Cloud',
  hostname:'DNS-имя',
  zone_id:'Зона Cloudflare',
  ttl:'TTL новых записей, сек.',
