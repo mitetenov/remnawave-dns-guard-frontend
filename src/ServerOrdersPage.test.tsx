@@ -92,6 +92,9 @@ describe('server ordering',()=>{
   await act(async()=>root.render(<App/>));
   expect(host.querySelector('h1')?.textContent).toBe('Серверы');
   expect(host.querySelector('nav [aria-current="page"]')?.textContent).toBe('Серверы');
+  const hostings=host.querySelector('section[aria-labelledby="server-hostings-title"]');
+  expect(hostings?.querySelector('button')).toBe(button('Заказать сервер'));
+  expect(hostings?.querySelector('a')?.getAttribute('href')).toBe('https://virtua.cloud/');
   await click('Заказать сервер');
   await choose('nl-ams1');
   expect(wizardSelect()?.textContent).toContain('Premium');
@@ -165,6 +168,61 @@ describe('server ordering',()=>{
   expect(host.textContent).toContain(job.domain);
   expect(sessionStorage.length).toBe(0);
  },20000);
+
+ it('connects Virtua.Cloud and resumes its paid order after a lost response',async()=>{
+  let configured=false;
+  const requests:unknown[]=[];
+  const choices:Record<string,{id:string;label:string}[]>={
+   ['kind=zone&provider=virtua']:[{id:'par01fr',label:'Paris · FR'}],
+   ['kind=plan&zone=par01fr&provider=virtua']:[{id:'paris-quote',label:'vCS-2 · 0.0167 EUR/ч без НДС'}],
+   ['kind=pool']:[{id:pool.id,label:pool.name}],
+   ['kind=group']:[{id:'nodes',label:'Обычная нода'}],
+   ['kind=profile&pool_id=pool-1&group=nodes']:[{id:'profile-1',label:'VLESS'}],
+  };
+  mockOrders((path,options)=>{
+   if(path==='/server-orders/settings/virtua'){
+    expect(options).toEqual(json('PUT',{virtua_token:'test-key'}));
+    configured=true;
+    return {ok:true};
+   }
+   if(options?.method==='POST'){
+    requests.push(JSON.parse(String(options.body)));
+    if(requests.length===1)throw new ApiError(0,'Ответ потерян.');
+    return {id:job.id};
+   }
+   if(path.startsWith('/server-orders/options?'))return {choices:choices[path.split('?')[1]]};
+   return {orders:requests.length>1?[{...job,zone:'par01fr',provider:'virtua'}]:[],pools:[pool],stages,virtua_configured:configured};
+  });
+  await act(async()=>root.render(<App/>));
+  const settings=host.querySelector<HTMLDetailsElement>('.virtua-settings')!;
+  expect(settings.textContent).toContain('Подключить Virtua.Cloud');
+  settings.open=true;
+  await type(settings.querySelector('input')!,'test-key');
+  await click('Сохранить токен');
+  expect(settings.querySelector('input')?.value).toBe('');
+  await click('Заказать сервер Virtua.Cloud');
+  await choose('par01fr');
+  expect(wizardSelect('Тариф')).toBeTruthy();
+  expect(host.querySelector('.order-wizard')?.textContent).not.toContain('Линейка тарифов');
+  await choose('paris-quote','Тариф');
+  await choose(pool.id);
+  await choose('nodes');
+  await choose('profile-1');
+  expect(host.querySelector('.order-wizard')?.textContent).toContain('Virtua.Cloud будет списывать средства');
+  await act(async()=>host.querySelector<HTMLInputElement>('.order-wizard input[type="checkbox"]')?.click());
+  await click('Подтвердить платный заказ');
+  await click('Закрыть заказ');
+  expect(button('Заказать сервер').disabled).toBe(true);
+  await click('Проверить отправку заказа Virtua.Cloud');
+  await act(async()=>host.querySelector<HTMLInputElement>('.order-wizard input[type="checkbox"]')?.click());
+  await click('Повторить запрос заказа');
+  expect(requests).toHaveLength(2);
+  expect(requests[0]).toEqual({
+   request_id:expect.stringMatching(/^[0-9a-f-]{36}$/),provider:'virtua',zone:'par01fr',plan:'paris-quote',pool_id:pool.id,group:'nodes',profile_id:'profile-1',
+  });
+  expect(requests[1]).toEqual(requests[0]);
+  expect(host.querySelector('.server-order')?.textContent).toContain('Virtua.Cloud');
+ });
 
  it('validates, previews and clears the template for a specific pool',async()=>{
   let template=pool.domain_template;

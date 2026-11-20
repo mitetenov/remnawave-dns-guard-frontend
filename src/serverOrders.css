@@ -1,5 +1,14 @@
 .sidebar{overflow-y:auto}
 .order-settings-link{color:#8dc8bf;text-decoration:underline;text-underline-offset:3px}
+.server-hostings-list{list-style:none;margin:0;padding:0}
+.server-hostings-list li{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:16px 20px}
+.server-hostings-list li+li{border-top:1px solid var(--border)}
+.server-hostings-list h3{font-size:14px;font-weight:620}
+.server-hostings-list p{margin-top:4px;color:var(--muted);font-size:12px}
+.virtua-actions{display:flex;gap:8px;flex-wrap:wrap}
+.virtua-settings{flex-basis:100%;font-size:12px}
+.virtua-settings summary{width:fit-content;cursor:pointer;color:#8dc8bf}
+.virtua-settings form{margin-top:12px;max-width:460px}
 .server-orders-list{list-style:none;margin:0;padding:0}
 .server-order{padding:20px;border-bottom:1px solid var(--border)}
 .server-order:last-child{border-bottom:0}

@@ -13,7 +13,9 @@ type Kind=typeof steps[number]['kind'];
 const planFamilies=[{id:'starter',label:'Starter'},{id:'premium',label:'Premium'}] as const;
 type Choice={id:string;label:string;family?:typeof planFamilies[number]['id']};
 type Selection=Partial<Record<Kind,Choice>>;
-type PendingOrder={id:string;selection:Selection};
+export type OrderProvider='upcloud'|'virtua';
+export const orderProviderNames={upcloud:'UpCloud',virtua:'Virtua.Cloud'} satisfies Record<OrderProvider,string>;
+type PendingOrder={id:string;selection:Selection;provider?:OrderProvider};
 const pendingKey='dns-guard:pending-server-order';
 
 function requestID(){
@@ -27,7 +29,7 @@ function requestID(){
 export function pendingServerOrder():PendingOrder|null{
  try{
   const value=JSON.parse(sessionStorage.getItem(pendingKey)??'null') as PendingOrder|null;
-  if(value&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value.id)&&steps.every(({kind})=>{
+  if(value&&(value.provider===undefined||Object.hasOwn(orderProviderNames,value.provider))&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value.id)&&steps.every(({kind})=>{
    const choice=value.selection?.[kind];
    return typeof choice?.id==='string'&&!!choice.id&&typeof choice.label==='string';
   }))return value;
@@ -42,8 +44,12 @@ function storePending(order:PendingOrder|null,expectedID?:string){
  }catch{/* The current form still keeps the request ID. */}
 }
 
-export function ServerOrderWizard({onClose,onOrdered,onAuthError,optionsRevision,refreshOptions}:{onClose:()=>void;onOrdered:()=>void;onAuthError:(error:unknown)=>string;optionsRevision:number;refreshOptions:()=>void}){
- const [restored]=useState(pendingServerOrder);
+export function ServerOrderWizard({provider,onClose,onOrdered,onAuthError,optionsRevision,refreshOptions}:{provider:OrderProvider;onClose:()=>void;onOrdered:()=>void;onAuthError:(error:unknown)=>string;optionsRevision:number;refreshOptions:()=>void}){
+ const [restored]=useState(()=>{
+  const pending=pendingServerOrder();
+  return pending&&(pending.provider??'upcloud')===provider?pending:null;
+ });
+ const providerName=orderProviderNames[provider];
  const [id]=useState(()=>restored?.id??requestID());
  const [selection,setSelection]=useState<Selection>(restored?.selection??{});
  const [planFamily,setPlanFamily]=useState('');
@@ -53,20 +59,22 @@ export function ServerOrderWizard({onClose,onOrdered,onAuthError,optionsRevision
  const sending=useRef(false),heading=useRef<HTMLHeadingElement>(null);
  const current=steps[step];
  const isPlan=current?.kind==='plan';
+ const chooseFamily=isPlan&&provider==='upcloud';
  const query=new URLSearchParams({kind:current?.kind??''});
  if(isPlan&&selection.zone)query.set('zone',selection.zone.id);
  if(current?.kind==='profile'){
   if(selection.pool)query.set('pool_id',selection.pool.id);
   if(selection.group)query.set('group',selection.group.id);
  }
+ if(provider==='virtua'&&(current?.kind==='zone'||isPlan))query.set('provider',provider);
  const requestKey=current?query.toString():'';
  const optionKey=`${requestKey}:${optionsRevision}`;
  const result=options?.key===optionKey?options:null;
  const availableChoices=result?.choices??[];
- const availableFamilies=isPlan?planFamilies.filter(family=>availableChoices.some(choice=>choice.family===family.id)):[];
+ const availableFamilies=chooseFamily?planFamilies.filter(family=>availableChoices.some(choice=>choice.family===family.id)):[];
  const selectedFamily=availableFamilies.find(family=>family.id===planFamily);
- const choices=isPlan?availableChoices.filter(choice=>choice.family===planFamily):availableChoices;
- const hasChoices=isPlan?availableFamilies.length>0:choices.length>0;
+ const choices=chooseFamily?availableChoices.filter(choice=>choice.family===planFamily):availableChoices;
+ const hasChoices=chooseFamily?availableFamilies.length>0:choices.length>0;
  const chosen=current?choices.find(choice=>choice.id===selection[current.kind]?.id):null;
  const complete=steps.every(({kind})=>!!selection[kind]?.id);
 
@@ -103,9 +111,9 @@ export function ServerOrderWizard({onClose,onOrdered,onAuthError,optionsRevision
   const {zone,plan,pool,group,profile}=selection;
   if(!zone||!plan||!pool||!group||!profile)return;
   sending.current=true;setBusy(true);setError('');
-  storePending({id,selection});
+  storePending({id,selection,provider});
   try{
-   const value=await api<{id:string}>('/server-orders',json('POST',{request_id:id,zone:zone.id,plan:plan.id,pool_id:pool.id,group:group.id,profile_id:profile.id}));
+   const value=await api<{id:string}>('/server-orders',json('POST',{request_id:id,zone:zone.id,plan:plan.id,pool_id:pool.id,group:group.id,profile_id:profile.id,...(provider==='virtua'?{provider}:{})}));
    if(!value?.id)throw new Error('Подтверждение заказа не получено.');
    storePending(null,id);onOrdered();
   }catch(error){
@@ -118,7 +126,7 @@ export function ServerOrderWizard({onClose,onOrdered,onAuthError,optionsRevision
 
  return <section className="panel order-wizard" aria-labelledby="order-wizard-title">
   <div className="panel-heading">
-   <div><h2 id="order-wizard-title">Заказать сервер</h2><p>UpCloud · Debian 13</p></div>
+   <div><h2 id="order-wizard-title">Заказать сервер</h2><p>{providerName} · Debian 13</p></div>
    <button type="button" className="icon-button" aria-label="Закрыть заказ" onClick={onClose} disabled={busy}><X size={19}/></button>
   </div>
   <form className="order-wizard-body" onSubmit={submit}>
@@ -131,27 +139,27 @@ export function ServerOrderWizard({onClose,onOrdered,onAuthError,optionsRevision
     {!result&&<p className="loading-label" role="status"><LoaderCircle className="spin" size={16}/>Загрузка вариантов…</p>}
     {result?.error&&<><div className="error-box" role="alert"><TriangleAlert size={17}/><span>{result.error}</span></div><button type="button" className="button secondary" onClick={refreshOptions}>Загрузить варианты снова</button></>}
     {result&&!result.error&&(hasChoices?<>
-     {isPlan&&<label className="field">
+     {chooseFamily&&<label className="field">
       <span>Линейка тарифов</span>
       <select value={selectedFamily?.id??''} onChange={event=>{setPlanFamily(event.target.value);select('plan',undefined);}}>
        <option value="" disabled>Выберите линейку</option>
        {availableFamilies.map(family=><option key={family.id} value={family.id}>{family.label}</option>)}
       </select>
      </label>}
-     {(!isPlan||selectedFamily)&&<label className="field">
+     {(!chooseFamily||selectedFamily)&&<label className="field">
       <select aria-label={current.label} value={chosen?.id??''} onChange={event=>select(current.kind,choices.find(choice=>choice.id===event.target.value))}>
        <option value="" disabled>{isPlan?'Выберите конфигурацию':'Выберите вариант'}</option>
        {choices.map(choice=><option key={choice.id} value={choice.id}>{choice.label}</option>)}
       </select>
       {isPlan&&chosen&&<small>{chosen.label}</small>}
      </label>}
-    </>:<><p className="field-help" role="status">{current.empty}</p><button type="button" className="button secondary" onClick={refreshOptions}>Обновить варианты</button></>)}
+    </>:<><p className="field-help" role="status">{provider==='virtua'&&current.kind==='zone'?'Нет доступных локаций Virtua.Cloud.':provider==='virtua'&&isPlan?'В этой локации нет доступных почасовых тарифов.':current.empty}</p><button type="button" className="button secondary" onClick={refreshOptions}>Обновить варианты</button></>)}
    </div>:<>
     <dl className="order-details">
      {steps.map(({kind,label})=><div key={kind}><dt>{label}</dt><dd>{selection[kind]?.label}</dd></div>)}
      <div><dt>Операционная система</dt><dd>Debian 13</dd></div>
     </dl>
-    <label className="checkbox-field order-confirm"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event=>setConfirmed(event.target.checked)}/><span>Подтверждаю заказ платного сервера. UpCloud будет списывать средства по указанному тарифу.</span></label>
+    <label className="checkbox-field order-confirm"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event=>setConfirmed(event.target.checked)}/><span>Подтверждаю заказ платного сервера. {providerName} будет списывать средства по указанному тарифу.</span></label>
     {error&&<div className="error-box" role="alert"><TriangleAlert size={17}/><span>{error}</span></div>}
     {pending&&<p className="field-help">Подтверждение от панели ещё не получено. При повторе будет отправлен тот же заказ.</p>}
    </>}
