@@ -27,6 +27,13 @@ const fieldLabels:Readonly<Record<string,string>>={
  cloudflare_api_token:'API Token (Cloudflare)',
  remnawave_url:'URL панели Remnawave',
  remnawave_api_token:'API Token (Remnawave)',
+ provider:'Провайдер',
+ server_uuid:'UUID сервера',
+ remnawave_uuid:'UUID узла Remnawave',
+ virtua_zone:'Локация нового сервера',
+ virtua_quote:'Тариф нового сервера',
+ virtua_group:'Тип ноды',
+ virtua_domain:'Отдельный домен ноды',
  bot_token:'Токен бота',
  chat_id:'Chat ID',
  enabled:'Уведомления Telegram',
@@ -40,6 +47,7 @@ export function validationMessage(detail:string,path:string):string {
  const endpoint=path.split(/[?#]/)[0];
  const labels:Readonly<Record<string,string>>={
   ...fieldLabels,
+  enabled:endpoint.startsWith('/replacements/targets/')?'Автозамена':fieldLabels.enabled,
   name:/\/targets(?:\/|$)/.test(endpoint)?'Название узла':'Название пула',
   url:/^\/agents\/[^/]+\/proxy(?:\/|$)/.test(endpoint)?'Прокси':'Ссылка на подписку',
  };
