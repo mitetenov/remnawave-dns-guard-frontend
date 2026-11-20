@@ -1,5 +1,5 @@
 import {useCallback,useEffect,useRef,useState,type FormEvent} from 'react';
-import {ArrowUpRight,Check,CheckCircle2,LoaderCircle,Server,ServerCog,TriangleAlert} from 'lucide-react';
+import {ArrowUpRight,Check,CheckCircle2,FileText,LoaderCircle,Server,ServerCog,TriangleAlert} from 'lucide-react';
 import {api,json} from './api';
 import {orderProviderNames,pendingServerOrder,ServerOrderWizard,type OrderProvider} from './ServerOrderWizard';
 import './serverOrders.css';
@@ -13,6 +13,7 @@ interface ServerOrder {
  plan:string;
  provider?:OrderProvider;
  created_at:string;
+ updated_at:string;
  ip:string|null;
  pool_hostname:string;
  group_name:string;
@@ -95,7 +96,48 @@ function timeLabel(value:string){
  return Number.isNaN(time.getTime())?value:time.toLocaleString('ru-RU');
 }
 
+interface OrderLogEntry {
+ id:number;
+ recorded_at:string;
+ stage:string;
+ level:'info'|'error';
+ message:string;
+ occurrences:number;
+}
+
+function ServerOrderLog({order,stages,onAuthError}:{order:ServerOrder;stages:Record<string,string>;onAuthError:ReportError}){
+ const [entries,setEntries]=useState<OrderLogEntry[]|null>(null);
+ const [error,setError]=useState(''),[revision,setRevision]=useState(0);
+ useEffect(()=>{
+  const controller=new AbortController();
+  setError('');
+  async function load(){
+   try{
+    const result=await api<OrderLogEntry[]>(`/server-orders/${encodeURIComponent(order.id)}/logs`,{signal:controller.signal});
+    if(!Array.isArray(result))throw new Error('Сервер вернул некорректный журнал заказа.');
+    if(!controller.signal.aborted)setEntries(result);
+   }catch(err){if(!controller.signal.aborted)setError(onAuthError(err));}
+  }
+  void load();
+  return()=>controller.abort();
+ },[order.id,order.updated_at,revision,onAuthError]);
+ return <section className="server-order-log" id={`order-log-${order.id}`} aria-label={`Журнал заказа ${order.domain}`}>
+  <h3>Журнал заказа</h3>
+  {error&&<><OrderError message={error}/><button className="button secondary" type="button" onClick={()=>setRevision(value=>value+1)}>Повторить загрузку</button></>}
+  {entries===null?!error&&<p role="status">Загрузка журнала…</p>:entries.length===0?<p>Записей пока нет.</p>:
+   <ol>{entries.map(entry=><li key={entry.id}>
+    <time dateTime={entry.recorded_at}>{timeLabel(entry.recorded_at)}</time>
+    <div><strong>{stages[entry.stage]??entry.stage}</strong>
+     {entry.level==='error'&&<span className="order-log-error"> · Ошибка</span>}
+     {entry.occurrences>1&&<span> · Повторений: {entry.occurrences-1}</span>}
+     {entry.message&&<p>{entry.message}</p>}
+    </div>
+   </li>)}</ol>}
+ </section>;
+}
+
 function ServerOrderRow({order,stages,reload,onAuthError}:{order:ServerOrder;stages:Record<string,string>;reload:()=>Promise<void>;onAuthError:ReportError}){
+ const [logOpen,setLogOpen]=useState(false);
  const [confirmation,setConfirmation]=useState<'cancel'|'retry-create'|null>(null);
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
  const canCancel=!!order.can_cancel,canRetry=!!order.can_retry_create;
@@ -138,10 +180,12 @@ function ServerOrderRow({order,stages,reload,onAuthError}:{order:ServerOrder;sta
     <button type="button" className="button danger" disabled={busy} onClick={()=>void actOnOrder()}>{busy&&<LoaderCircle className="spin" size={16}/>} {confirmation==='cancel'?'Да, отменить заказ':'Подтвердить отсутствие и повторить'}</button>
    </div>
   </div>}
-  {!showConfirmation&&(canCancel||canRetry)&&<div className="server-order-actions">
-   {canCancel&&<button type="button" className="button secondary" disabled={busy} onClick={()=>{setConfirmation('cancel');setError('');}}>Отменить заказ</button>}
-   {canRetry&&<button type="button" className="button secondary" disabled={busy} onClick={()=>{setConfirmation('retry-create');setError('');}}>Повторить создание</button>}
-  </div>}
+  <div className="server-order-actions">
+   <button type="button" className="button secondary" aria-expanded={logOpen} aria-controls={logOpen?`order-log-${order.id}`:undefined} onClick={()=>setLogOpen(open=>!open)}><FileText size={16}/>{logOpen?'Скрыть логи':'Логи'}</button>
+   {!showConfirmation&&canCancel&&<button type="button" className="button secondary" disabled={busy} onClick={()=>{setConfirmation('cancel');setError('');}}>Отменить заказ</button>}
+   {!showConfirmation&&canRetry&&<button type="button" className="button secondary" disabled={busy} onClick={()=>{setConfirmation('retry-create');setError('');}}>Повторить создание</button>}
+  </div>
+  {logOpen&&<ServerOrderLog order={order} stages={stages} onAuthError={onAuthError}/>}
   {error&&<OrderError message={error}/>}
  </li>;
 }

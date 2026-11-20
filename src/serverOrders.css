@@ -23,6 +23,14 @@
 .server-order .error-box{margin:12px 0 0}
 .server-order-actions,.order-wizard-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .server-order-actions{margin-top:12px}
+.server-order-log{margin-top:14px;padding:12px 14px;border:1px solid var(--border);border-radius:8px;font-size:12px}
+.server-order-log h3{font-size:13px;margin-bottom:8px}
+.server-order-log ol{max-height:22rem;overflow-y:auto;list-style:none;margin:0;padding:0}
+.server-order-log li{display:flex;align-items:baseline;gap:6px 16px;flex-wrap:wrap;padding:8px 0;overflow-wrap:anywhere}
+.server-order-log li+li{border-top:1px solid var(--border)}
+.server-order-log time,.server-order-log li span{color:var(--muted);font-size:11px}
+.server-order-log li .order-log-error{color:#f3a6ae}
+.server-order-log li p{margin:4px 0 0;white-space:pre-wrap}
 .server-order-confirmation{padding:12px 14px;margin-top:13px;border:1px solid #514131;border-radius:8px;background:#28231f;color:#e3c6a5}
 .server-order-confirmation p{font-size:12px;line-height:1.6}
 .server-order-confirmation p+p{margin-top:6px;overflow-wrap:anywhere}

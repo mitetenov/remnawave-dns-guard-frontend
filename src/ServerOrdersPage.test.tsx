@@ -297,6 +297,41 @@ describe('server ordering',()=>{
   expect(button('Продолжить').disabled).toBe(false);
  });
 
+ it('loads only the expanded order journal, retries on failure and follows new entries',async()=>{
+  let updated_at='2026-11-20T15:00:00Z';
+  const diagnostic='Virtua.Cloud GET /v1/cloud/systems (HTTP 200): поле systems.version';
+  const logs=vi.fn().mockRejectedValueOnce(new Error('Ошибка загрузки')).mockImplementation(async()=>[
+   {id:1,recorded_at:updated_at,stage:'provision',level:'error',message:diagnostic,occurrences:2},
+  ]);
+  mockOrders(path=>{
+   if(path.endsWith('/logs')){
+    expect(path).toBe('/server-orders/job-1/logs');
+    return logs();
+   }
+   return {orders:[{...job,updated_at},{...job,id:'job-2',stage:'complete',updated_at}],pools:[],stages};
+  });
+  await act(async()=>root.render(<App/>));
+  const buttons=[...host.querySelectorAll<HTMLButtonElement>('button')].filter(b=>b.textContent==='Логи');
+  expect(buttons).toHaveLength(2);
+  expect(logs).not.toHaveBeenCalled();
+  await click('Логи');
+  expect(host.textContent).toContain('Ошибка загрузки');
+  await click('Повторить загрузку');
+  const log=host.querySelector('.server-order-log')!;
+  expect(log.textContent).toContain(stages.provision);
+  expect(log.textContent).toContain(diagnostic);
+  expect(log.textContent).toContain('Повторений: 1');
+  expect(buttons[0].getAttribute('aria-expanded')).toBe('true');
+  updated_at='2026-11-20T15:01:00Z';
+  await act(async()=>{await vi.advanceTimersByTimeAsync(20000);});
+  expect(log.querySelector('time')?.dateTime).toBe(updated_at);
+  await click('Скрыть логи');
+  expect(host.querySelector('.server-order-log')).toBeNull();
+  updated_at='2026-11-20T15:02:00Z';
+  await act(async()=>{await vi.advanceTimersByTimeAsync(20000);});
+  expect(logs).toHaveBeenCalledTimes(3);
+ });
+
  it('refreshes order status and requires explicit confirmation for cancel and retry',async()=>{
   let orders=[{...job,can_cancel:true,can_retry_create:false}];
   mockOrders((path,options)=>{
