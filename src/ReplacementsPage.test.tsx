@@ -34,7 +34,7 @@ function mockRequests(replacements:(path:string,options?:RequestInit)=>unknown){
  vi.mocked(api).mockImplementation(async <T,>(path:string,options?:RequestInit)=>{
   if(path==='/auth/me')return {username:'review'} as T;
   if(path==='/settings'||path==='/overview')return {} as T;
-  if(path.startsWith('/replacements'))return await replacements(path,options) as T;
+  if(path.startsWith('/replacements')||path.startsWith('/server-orders/options?'))return await replacements(path,options) as T;
   return [] as T;
  });
 }
@@ -61,6 +61,47 @@ async function type(field:HTMLInputElement,value:string){
 }
 
 describe('automatic replacement settings',()=>{
+ it('binds an existing Virtua server to a quoted plan after opt-in',async()=>{
+  mockRequests((path,options)=>{
+   if(path.startsWith('/server-orders/options?')){
+    const query=new URLSearchParams(path.split('?')[1]);
+    expect(query.get('provider')).toBe('virtua');
+    if(query.get('kind')==='zone')return {choices:[{id:'par01fr',label:'Paris'}]};
+    expect(query.get('zone')).toBe('par01fr');
+    return {choices:[{id:'plan@quote',label:'Linux · 0.02 EUR/ч'}]};
+   }
+   if(options?.method==='PUT')return {ok:true};
+   return {...snapshot,virtua_configured:true,order_ansible_ready:true,order_ansible_error:''};
+  });
+  await render();
+  const details=container.querySelector<HTMLDetailsElement>('.replacement-target')!;
+  await act(async()=>{
+   details.open=true;
+   details.dispatchEvent(new Event('toggle'));
+  });
+  async function choose(name:string,value:string){
+   const field=[...details.querySelectorAll('label')].find(label=>label.querySelector('span')?.textContent===name)?.querySelector('select');
+   if(!field)throw new Error(`Поле «${name}» не найдено`);
+   await act(async()=>{
+    field.value=value;
+    field.dispatchEvent(new Event('change',{bubbles:true}));
+   });
+  }
+  await choose('Провайдер','virtua');
+  await type(details.querySelector<HTMLInputElement>('input[type=text]')!,serverID);
+  expect(button('Сохранить привязку').disabled).toBe(true);
+  await choose('Локация нового сервера','par01fr');
+  await choose('Тариф нового сервера','plan@quote');
+  await choose('Тип ноды','nodes');
+  await type(input('[placeholder="node.example.com"]'),'node.example.com');
+  await act(async()=>input('.replacement-binding input[type=checkbox]').click());
+  await act(async()=>button('Сохранить привязку').click());
+  expect(api).toHaveBeenCalledWith('/replacements/targets/target',json('PUT',{
+   provider:'virtua',server_uuid:serverID,remnawave_uuid:nodeID,enabled:true,
+   virtua_zone:'par01fr',virtua_quote:'plan@quote',virtua_group:'nodes',virtua_domain:'node.example.com',
+  }));
+ });
+
  it('opens from a hash, reports Ansible readiness, and writes a new token without redisplaying it',async()=>{
   mockRequests((path,options)=>{
    if(path==='/replacements/settings'&&options?.method==='PUT')return {ok:true};
