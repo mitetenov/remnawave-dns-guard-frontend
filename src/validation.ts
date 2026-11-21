@@ -27,6 +27,7 @@ const fieldLabels:Readonly<Record<string,string>>={
  cloudflare_api_token:'API Token (Cloudflare)',
  remnawave_url:'URL панели Remnawave',
  remnawave_api_token:'API Token (Remnawave)',
+ upcloud_token:'API-токен UpCloud',
  provider:'Провайдер',
  server_uuid:'UUID сервера',
  remnawave_uuid:'UUID узла Remnawave',
