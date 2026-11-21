@@ -65,6 +65,32 @@ async function type(input:HTMLInputElement,value:string){
 }
 
 describe('server ordering',()=>{
+ it('selects all deletion options by default and sends only the confirmed selection',async()=>{
+  const complete={...job,stage:'complete',provider:'virtua',ip:'8.8.4.4'};
+  let deleting=false;
+  mockOrders((path,options)=>{
+   if(options?.method==='DELETE'){
+    expect(path).toBe('/server-orders/job-1');
+    expect(options).toEqual(json('DELETE',{hosting:false,remnawave:true,dns:true}));
+    deleting=true;
+    return {ok:true};
+   }
+   return {orders:[deleting?{...complete,stage:'deleting'}:complete],pools:[pool],stages:{...stages,deleting:'Удаление'}};
+  });
+  await act(async()=>root.render(<App/>));
+  await click('Удалить сервер');
+  const dialog=host.querySelector('[role="dialog"]')!;
+  const checks=[...dialog.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+  expect(checks.map(input=>input.checked)).toEqual([true,true,true]);
+  expect(dialog.textContent).toContain('Virtua.Cloud');
+  await act(async()=>checks.forEach(input=>input.click()));
+  expect(button('Удалить выбранное').disabled).toBe(true);
+  await act(async()=>{checks[1].click();checks[2].click();});
+  await click('Удалить выбранное');
+  expect(deleting).toBe(true);
+  expect(host.querySelector('[role="dialog"]')).toBeNull();
+  expect(host.querySelector('.server-order .badge')?.textContent).toBe('Удаление');
+ });
  it('filters tariffs by location and family, confirms both prices and reuses the request after session expiry',async()=>{
   const post:unknown[]=[];
   const choices:Record<string,{id:string;label:string;family?:string}[]>={

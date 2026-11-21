@@ -19,6 +19,7 @@ import {TargetChecks} from './TargetChecks';
 import {AgentsPage} from './AgentsPage';
 import {ReplacementsPage,useReplacements} from './ReplacementsPage';
 import {ServerOrdersPage,useServerOrders} from './ServerOrdersPage';
+import {Modal} from './Modal';
 type ModalState={type:'pool';pool?:Pool}|{type:'target';pool:Pool;target?:Target}|{type:'import';pool:Pool}|{type:'profile';pool:Pool;checkAfterSave?:boolean}|{type:'delete-target';target:Target}|{type:'confirm';title:string;description:string;label:string;danger?:boolean;deletedPoolId?:string;successMessage?:string;action:()=>Promise<unknown>}|null;
 type Notice={message:string;error:boolean};
 const statusNames:Record<TargetStatus,string>={unknown:'Ожидает проверки',healthy:'Доступен',suspect:'Под подозрением',excluded:'Исключён',recovering:'Восстанавливается',disabled:'Отключён вручную',protected:'Последний A · защищён',stale:'Нет свежих данных'};
@@ -30,12 +31,6 @@ function Empty({icon=<Network size={28}/>,title,description,action}:{icon?:React
 function ErrorBox({message}:{message:string}){return <div className="error-box" role="alert"><TriangleAlert size={18}/><span>{message}</span></div>}
 function Spinner({label='Загрузка…'}:{label?:string}){return <span className="loading-label"><LoaderCircle className="spin" size={17}/>{label}</span>}
 function Field({label,help,children}:{label:string;help?:string;children:ReactNode}){return <label className="field"><span>{label}</span>{children}{help&&<small>{help}</small>}</label>}
-function Modal({title,subtitle,children,onClose,busy=false}:{title:string;subtitle?:string;children:ReactNode;onClose:()=>void;busy?:boolean}){
- const dialog=useRef<HTMLDivElement>(null),stateRef=useRef({busy,onClose});stateRef.current={busy,onClose};
- useEffect(()=>{const previous=document.activeElement as HTMLElement|null;const first=dialog.current?.querySelector<HTMLElement>('input:not(:disabled),select:not(:disabled),textarea:not(:disabled),button:not(:disabled)');first?.focus();const handle=(event:KeyboardEvent)=>{if(event.key==='Escape'&&!stateRef.current.busy)stateRef.current.onClose();if(event.key==='Tab'){const all=[...(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]')||[])];const first=all[0],last=all[all.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}}};document.addEventListener('keydown',handle);const old=document.body.style.overflow;document.body.style.overflow='hidden';return()=>{document.removeEventListener('keydown',handle);document.body.style.overflow=old;previous?.focus();};},[]);
- return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)onClose();}}><div ref={dialog} className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header className="modal-header"><div><h2 id="modal-title">{title}</h2>{subtitle&&<p>{subtitle}</p>}</div><IconButton label="Закрыть" onClick={onClose} disabled={busy}><X size={20}/></IconButton></header>{children}</div></div>;
-}
-
 export default function App(){
  const [user,setUser]=useState<string|null>(null),[authLoading,setAuthLoading]=useState(true);
  const [page,setPage]=useState<Page>(()=>pageFromHash(window.location.hash));
