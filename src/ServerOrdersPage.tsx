@@ -1,6 +1,7 @@
 import {useCallback,useEffect,useRef,useState,type FormEvent} from 'react';
-import {ArrowUpRight,Check,CheckCircle2,FileText,LoaderCircle,Server,ServerCog,TriangleAlert} from 'lucide-react';
+import {ArrowUpRight,Check,CheckCircle2,FileText,LoaderCircle,Server,ServerCog,Trash2,TriangleAlert} from 'lucide-react';
 import {api,json} from './api';
+import {Modal} from './Modal';
 import {orderProviderNames,pendingServerOrder,ServerOrderWizard,type OrderProvider} from './ServerOrderWizard';
 import './serverOrders.css';
 
@@ -20,7 +21,9 @@ interface ServerOrder {
  profile_name:string;
  can_cancel?:boolean;
  can_retry_create?:boolean;
+ deleted_resources?:DeletionOptions;
 }
+type DeletionOptions={hosting:boolean;remnawave:boolean;dns:boolean};
 interface OrderPool {id:string;name:string;hostname:string;domain_template:string|null}
 interface OrderSnapshot {orders:ServerOrder[];pools:OrderPool[];stages:Record<string,string>;virtua_configured?:boolean}
 type ReportError=(error:unknown)=>string;
@@ -136,13 +139,58 @@ function ServerOrderLog({order,stages,onAuthError}:{order:ServerOrder;stages:Rec
  </section>;
 }
 
-function ServerOrderRow({order,stages,reload,onAuthError}:{order:ServerOrder;stages:Record<string,string>;reload:()=>Promise<void>;onAuthError:ReportError}){
+function ServerDeleteModal({order,onClose,onQueued,onAuthError}:{order:ServerOrder;onClose:()=>void;onQueued:()=>Promise<void>;onAuthError:ReportError}){
+ const deleted=order.deleted_resources;
+ const [selected,setSelected]=useState<DeletionOptions>({hosting:!deleted?.hosting,remnawave:!deleted?.remnawave,dns:!deleted?.dns});
+ const [busy,setBusy]=useState(false),[error,setError]=useState('');
+ const options=[
+  {key:'hosting',label:`Удалить сервер у хостинга ${orderProviderNames[order.provider??'upcloud']}`},
+  {key:'remnawave',label:'Удалить ноду из панели Remnawave'},
+  {key:'dns',label:'Удалить записи из DNS и узел из DNS Guard'},
+ ] as const;
+ const hasSelection=Object.values(selected).some(Boolean);
+
+ async function submit(event:FormEvent){
+  event.preventDefault();
+  if(busy||!hasSelection)return;
+  setBusy(true);setError('');
+  try{
+   await api(`/server-orders/${encodeURIComponent(order.id)}`,json('DELETE',selected));
+   await onQueued();
+  }catch(error){setError(onAuthError(error));}
+  finally{setBusy(false);}
+ }
+
+ return <Modal title="Удалить сервер?" subtitle={order.ip?`${order.domain} · ${order.ip}`:order.domain} onClose={onClose} busy={busy}>
+  <form onSubmit={submit}>
+   <div className="modal-body">
+    {error&&<OrderError message={error}/>}
+    {options.map(({key,label})=><label className="checkbox-field" key={key}>
+     <input type="checkbox" checked={selected[key]} disabled={busy||deleted?.[key]} onChange={event=>{
+      const checked=event.target.checked;
+      setSelected(previous=>({...previous,[key]:checked}));
+     }}/>
+     <span>{label}{deleted?.[key]&&' · Уже удалено'}</span>
+    </label>)}
+    {selected.hosting&&(order.provider??'upcloud')==='upcloud'&&<p className="field-help">UpCloud удалит сервер вместе с подключёнными дисками.</p>}
+    {selected.dns&&<p className="field-help">Если это последняя A-запись пула, сначала опубликуйте в пуле другой IP.</p>}
+   </div>
+   <div className="modal-footer">
+    <button type="button" className="button secondary" disabled={busy} onClick={onClose}>Отмена</button>
+    <button className="button danger" disabled={busy||!hasSelection}>{busy?<><LoaderCircle className="spin" size={16}/>Отправка…</>:'Удалить выбранное'}</button>
+   </div>
+  </form>
+ </Modal>;
+}
+
+function ServerOrderRow({order,stages,reload,onDelete,onAuthError}:{order:ServerOrder;stages:Record<string,string>;reload:()=>Promise<void>;onDelete:()=>void;onAuthError:ReportError}){
  const [logOpen,setLogOpen]=useState(false);
  const [confirmation,setConfirmation]=useState<'cancel'|'retry-create'|null>(null);
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
  const canCancel=!!order.can_cancel,canRetry=!!order.can_retry_create;
  const showConfirmation=(confirmation==='cancel'&&canCancel)||(confirmation==='retry-create'&&canRetry);
- const tone=order.error||order.stage==='rejected'?'red':order.stage==='complete'?'green':order.stage==='cancelled'?'muted':'blue';
+ const partiallyDeleted=order.stage==='complete'&&Object.values(order.deleted_resources??{}).some(Boolean);
+ const tone=order.error||order.stage==='rejected'?'red':partiallyDeleted||order.stage==='deleting'?'amber':order.stage==='complete'?'green':['cancelled','deleted'].includes(order.stage)?'muted':'blue';
  const provider=order.provider??'upcloud';
  const providerName=orderProviderNames[provider];
  const groupName=order.group_name==='nodes'?'Обычная нода':order.group_name==='nodes_wl'?'Нода за CDN':order.group_name;
@@ -160,7 +208,7 @@ function ServerOrderRow({order,stages,reload,onAuthError}:{order:ServerOrder;sta
  return <li className="server-order">
   <div className="server-order-heading">
    <div className="server-order-name"><span className="pool-symbol"><Server size={17}/></span><div><strong>{order.domain||'Домен назначается'}</strong><small>{order.pool_hostname}</small></div></div>
-   <span className={`badge ${tone}`}><span className="badge-dot"/>{Object.hasOwn(stages,order.stage)?stages[order.stage]:order.stage}</span>
+   <span className={`badge ${tone}`}><span className="badge-dot"/>{partiallyDeleted?'Частично удалён':Object.hasOwn(stages,order.stage)?stages[order.stage]:order.stage}</span>
   </div>
   <dl className="order-details">
    <div><dt>Хостинг</dt><dd>{providerName}</dd></div>
@@ -184,6 +232,7 @@ function ServerOrderRow({order,stages,reload,onAuthError}:{order:ServerOrder;sta
    <button type="button" className="button secondary" aria-expanded={logOpen} aria-controls={logOpen?`order-log-${order.id}`:undefined} onClick={()=>setLogOpen(open=>!open)}><FileText size={16}/>{logOpen?'Скрыть логи':'Логи'}</button>
    {!showConfirmation&&canCancel&&<button type="button" className="button secondary" disabled={busy} onClick={()=>{setConfirmation('cancel');setError('');}}>Отменить заказ</button>}
    {!showConfirmation&&canRetry&&<button type="button" className="button secondary" disabled={busy} onClick={()=>{setConfirmation('retry-create');setError('');}}>Повторить создание</button>}
+   {order.stage==='complete'&&<button type="button" className="button secondary" onClick={onDelete}><Trash2 size={16}/>Удалить сервер</button>}
   </div>
   {logOpen&&<ServerOrderLog order={order} stages={stages} onAuthError={onAuthError}/>}
   {error&&<OrderError message={error}/>}
@@ -221,10 +270,12 @@ export function ServerOrdersPage({snapshot,loading,error,reload,optionsRevision,
  const pending=pendingServerOrder();
  const pendingProvider=pending?(pending.provider??'upcloud'):null;
  const [ordering,setOrdering]=useState<OrderProvider|null>(pendingProvider),[ordered,setOrdered]=useState(false);
+ const [deletionID,setDeletionID]=useState<string|null>(null);
  const virtuaConfigured=!!snapshot?.virtua_configured;
 
  function order(provider:OrderProvider){setOrdered(false);setOrdering(provider);}
  const orders=snapshot?.orders??[],pools=snapshot?.pools??[];
+ const deletingOrder=orders.find(order=>order.id===deletionID);
 
  return <div className="server-orders-page" aria-busy={loading}>
   {error&&<OrderError message={error}/>}
@@ -251,7 +302,7 @@ export function ServerOrdersPage({snapshot,loading,error,reload,optionsRevision,
     <div><h2 id="server-orders-title">Заказы серверов</h2><p><a className="order-settings-link" href="#replacements">Подключение UpCloud и Ansible</a></p></div>
    </div>
    {!snapshot?loading&&<div className="panel-loading" role="status"><span className="loading-label"><LoaderCircle className="spin" size={17}/>Загрузка заказов…</span></div>:orders.length?
-    <ul className="server-orders-list">{orders.map(order=><ServerOrderRow key={order.id} order={order} stages={snapshot.stages} reload={reload} onAuthError={onAuthError}/>)}</ul>:
+    <ul className="server-orders-list">{orders.map(order=><ServerOrderRow key={order.id} order={order} stages={snapshot.stages} reload={reload} onDelete={()=>setDeletionID(order.id)} onAuthError={onAuthError}/>)}</ul>:
     <div className="empty"><div className="empty-icon"><Server size={26}/></div><h3>Заказов ещё нет</h3></div>}
   </section>
   {snapshot&&<section className="panel" aria-labelledby="order-templates-title">
@@ -261,5 +312,6 @@ export function ServerOrdersPage({snapshot,loading,error,reload,optionsRevision,
     {pools.map(pool=><OrderPoolTemplate key={pool.id} pool={pool} reload={reload} onAuthError={onAuthError}/>)}</div>:
     <p className="server-orders-empty">Сначала создайте DNS-пул в разделе «DNS-пулы».</p>}
   </section>}
+  {deletingOrder&&<ServerDeleteModal key={deletingOrder.id} order={deletingOrder} onClose={()=>setDeletionID(null)} onQueued={async()=>{setDeletionID(null);await reload(true);}} onAuthError={onAuthError}/>}
  </div>;
 }
