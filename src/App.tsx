@@ -5,23 +5,24 @@ import {blankProfile,isPublicIPv4,parseProfileURI,profileForProtocol,validatePro
 import {loadSubscription,type SubscriptionServer} from './subscription';
 import {profileWithExtra} from './xhttpExtra';
 import {profileWithALPN} from './alpn';
-import type {GuardEvent,Host,Node,Overview,Pool,PoolInput,ProbeProfile,Settings,Target,TargetStatus,Zone} from './types';
+import type {Checker,GuardEvent,Host,Node,Overview,Pool,PoolInput,ProbeProfile,Settings,Target,TargetStatus,Zone} from './types';
 
-import {pageNames,pageFromHash,type Page} from './navigation';
-import {TargetDNS} from './TargetDNS';
-import {TargetCards} from './TargetCards';
-import {TargetIP} from './TargetIP';
+import {pageNames,poolHash,routeFromHash} from './navigation';
+import {EventList,EventsPage,type EventsRefresh} from './EventsPage';
+import {TargetCards,targetAnchorId} from './TargetCards';
 import {NotificationsSettings} from './NotificationsSettings';
 import {PoolTargetCount} from './PoolTargetCount';
-import {statusTone} from './status';
-import {checkerCount} from './CheckersPanel';
-import {TargetChecks} from './TargetChecks';
+import {PoolCheckProgress,summarizePoolCheck,type PoolCheckReceipt,type PoolCheckRun} from './PoolCheckProgress';
+import {checkerCount} from './status';
+import {ProviderSettings,providerSettingsHash} from './ProviderSettings';
 import {AgentsPage} from './AgentsPage';
 import {ReplacementsPage,useReplacements} from './ReplacementsPage';
 import {ServerOrdersPage,useServerOrders} from './ServerOrdersPage';
 import {Modal} from './Modal';
 type ModalState={type:'pool';pool?:Pool}|{type:'target';pool:Pool;target?:Target}|{type:'import';pool:Pool}|{type:'profile';pool:Pool;checkAfterSave?:boolean}|{type:'delete-target';target:Target}|{type:'confirm';title:string;description:string;label:string;danger?:boolean;deletedPoolId?:string;successMessage?:string;action:()=>Promise<unknown>}|null;
 type Notice={message:string;error:boolean};
+type PanelHeader=Pick<Overview,'pools'|'agents_total'|'agents_healthy'|'agent_healthy'>;
+const mobileQuery='(max-width:760px)';
 const statusNames:Record<TargetStatus,string>={unknown:'Ожидает проверки',healthy:'Доступен',suspect:'Под подозрением',excluded:'Исключён',recovering:'Восстанавливается',disabled:'Отключён вручную',protected:'Последний A · защищён',stale:'Нет свежих данных'};
 function date(value:string|null){return value?new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date(value)):'Ещё не было';}
 function errorMessage(error:unknown){return error instanceof Error?error.message:'Не удалось выполнить действие. Попробуйте ещё раз.';}
@@ -33,50 +34,263 @@ function Spinner({label='Загрузка…'}:{label?:string}){return <span cla
 function Field({label,help,children}:{label:string;help?:string;children:ReactNode}){return <label className="field"><span>{label}</span>{children}{help&&<small>{help}</small>}</label>}
 export default function App(){
  const [user,setUser]=useState<string|null>(null),[authLoading,setAuthLoading]=useState(true);
- const [page,setPage]=useState<Page>(()=>pageFromHash(window.location.hash));
- const [mobileOpen,setMobileOpen]=useState(false),[overview,setOverview]=useState<Overview|null>(null),[pools,setPools]=useState<Pool[]>([]),[events,setEvents]=useState<GuardEvent[]>([]),[settings,setSettings]=useState<Settings|null>(null);
- const [selectedId,setSelectedId]=useState<string|null>(null),[targets,setTargets]=useState<Target[]>([]),[targetsLoading,setTargetsLoading]=useState(false);
+ const [route,setRoute]=useState(()=>routeFromHash(window.location.hash));
+ const {page,poolId,targetId}=route;
+ const [overview,setOverview]=useState<Overview|null>(null),[header,setHeader]=useState<PanelHeader|null>(null);
+ const [pools,setPools]=useState<Pool[]>([]),[poolsLoaded,setPoolsLoaded]=useState(false),[settings,setSettings]=useState<Settings|null>(null);
+ const [agents,setAgents]=useState<Checker[]>([]);
+ const [targetData,setTargetData]=useState<{poolId:string;items:Target[];error:string;loading:boolean}|null>(null);
+ const [events,setEvents]=useState<GuardEvent[]>([]),[eventLoading,setEventLoading]=useState(true),[eventError,setEventError]=useState('');
+ const [eventsRefresh,setEventsRefresh]=useState<EventsRefresh>({sequence:0,quiet:false});
  const [loading,setLoading]=useState(true),[loadError,setLoadError]=useState(''),[updated,setUpdated]=useState<Date|null>(null),[notice,setNotice]=useState<Notice|null>(null),[modal,setModal]=useState<ModalState>(null),[busyKeys,setBusyKeys]=useState<Set<string>>(new Set());
- const [eventLevel,setEventLevel]=useState(''),[eventType,setEventType]=useState(''),[eventPool,setEventPool]=useState(''),[eventLoading,setEventLoading]=useState(false),[eventError,setEventError]=useState('');
- const selected=pools.find(p=>p.id===selectedId)||null;
- const selectedRef=useRef(selectedId),dashboardRequest=useRef(0),targetRequest=useRef(0),eventRequest=useRef(0);selectedRef.current=selectedId;
- const invalidateRequests=useCallback(()=>{dashboardRequest.current++;targetRequest.current++;eventRequest.current++;},[]);
- const handleFailure=useCallback((error:unknown)=>{if(error instanceof ApiError&&error.status===401){invalidateRequests();setUser(null);setModal(null);}return errorMessage(error);},[invalidateRequests]);
+ const [mobileOpen,setMobileOpen]=useState(false);
+ const [settingsRevision,setSettingsRevision]=useState(0);
+ const [manualChecks,setManualChecks]=useState<Map<string,PoolCheckRun>>(()=>new Map());
+ const [checkClock,setCheckClock]=useState(0);
+ const mobileMenu=useRef<HTMLButtonElement>(null),sidebar=useRef<HTMLElement>(null),closeMenuButton=useRef<HTMLButtonElement>(null);
+ const [mobileViewport,setMobileViewport]=useState(()=>window.matchMedia?.(mobileQuery).matches??false);
+ const selected=poolId?pools.find(pool=>pool.id===poolId):undefined;
+ const selectedId=selected?.id;
+ const currentTargets=targetData?.poolId===selectedId?targetData:null;
+ const targets=currentTargets?.items??[];
+ const targetsLoading=!!selectedId&&(!currentTargets||currentTargets.loading);
+ const manualCheck=selectedId?manualChecks.get(selectedId):undefined;
+ const checkSummary=manualCheck?summarizePoolCheck(manualCheck,targets):undefined;
+ const waitingForChecks=!!manualCheck?.expected_agents.length&&!checkSummary?.complete&&Math.max(checkClock,Date.now())<manualCheck.waitUntil;
+ const shell=page==='overview'?overview??header:header??overview;
+ const routeRef=useRef(route);
+ const selectedRef=useRef(selectedId);
+ selectedRef.current=selectedId;
+ const dashboardRequest=useRef<AbortController|null>(null),targetRequest=useRef<AbortController|null>(null),eventRequest=useRef<AbortController|null>(null);
+ const invalidateRequests=useCallback(()=>{dashboardRequest.current?.abort();targetRequest.current?.abort();eventRequest.current?.abort();},[]);
+ const clearSession=useCallback(()=>{
+  invalidateRequests();
+  setUser(null);setModal(null);setMobileOpen(false);
+  setOverview(null);setHeader(null);setPools([]);setPoolsLoaded(false);setSettings(null);setAgents([]);
+  setTargetData(null);setEvents([]);setUpdated(null);setNotice(null);setManualChecks(new Map());
+ },[invalidateRequests]);
+ const handleFailure=useCallback((error:unknown)=>{
+  if(error instanceof ApiError&&error.status===401)clearSession();
+  return errorMessage(error);
+ },[clearSession]);
  const replacements=useReplacements(!!user&&page==='replacements',handleFailure);
  const reloadReplacements=replacements.reload;
  const serverOrders=useServerOrders(!!user&&page==='servers',handleFailure);
  const reloadServerOrders=serverOrders.reload;
- useEffect(()=>{let active=true;api<{username:string}>('/auth/me').then(data=>{if(active)setUser(data.username);}).catch(error=>{if(active&&(!(error instanceof ApiError)||error.status!==401))setLoadError(errorMessage(error));}).finally(()=>{if(active)setAuthLoading(false);});return()=>{active=false;};},[]);
+ useEffect(()=>{let active=true;api<{username:string}>('/auth/me').then(data=>{if(active)setUser(data.username);}).catch(error=>{if(active&&(!(error instanceof ApiError)||error.status!==401))setLoadError(errorMessage(error));}).finally(()=>{if(active)setAuthLoading(false);});return()=>{active=false;invalidateRequests();};},[invalidateRequests]);
+
  const load=useCallback(async(quiet=false)=>{
-  const request=++dashboardRequest.current;
-  if(!quiet)setLoading(true);
-  const results=await Promise.allSettled([api<Overview>('/overview'),api<Pool[]>('/pools'),api<Settings>('/settings')]);
-  if(request!==dashboardRequest.current)return;
-  const errors=results.flatMap(result=>result.status==='rejected'?[result.reason]:[]);
-  const authError=errors.find(error=>error instanceof ApiError&&error.status===401);
-  if(authError){handleFailure(authError);setLoading(false);return;}
-  if(results[0].status==='fulfilled')setOverview(results[0].value);
-  if(results[1].status==='fulfilled')setPools(results[1].value);
-  if(results[2].status==='fulfilled')setSettings(results[2].value);
-  const firstError=errors.length?handleFailure(errors[0]):'';
-  setLoadError(firstError);
-  if(!firstError)setUpdated(new Date());
+  const activePage=routeRef.current.page;
+  dashboardRequest.current?.abort();
+  const request=new AbortController();
+  dashboardRequest.current=request;
+  if(!quiet){setLoading(true);setLoadError('');}
+  const errors:unknown[]=[];
+  const fetchResource=async<T,>(path:string,apply:(data:T)=>void)=>{
+   try{
+    const data=await api<T>(path,{signal:request.signal});
+    if(!request.signal.aborted)apply(data);
+   }catch(error){
+    if(request.signal.aborted)return;
+    errors.push(error);
+    if(error instanceof ApiError&&error.status===401){
+     handleFailure(error);
+     setLoadError('');
+     setLoading(false);
+    }
+   }
+  };
+  const headerRequest=activePage==='overview'?null:fetchResource<PanelHeader>('/header',data=>setHeader(data));
+  const requests:Promise<void>[]=[];
+  if(activePage==='overview')requests.push(fetchResource<Overview>('/overview',data=>{setOverview(data);setHeader(data);}));
+  if(activePage==='overview'||activePage==='pools'||activePage==='events'&&!quiet){
+   requests.push(fetchResource<Pool[]>('/pools',data=>{setPools(data);setPoolsLoaded(true);}));
+  }
+  if(activePage==='settings')requests.push(fetchResource<Settings>('/settings',data=>setSettings(data)));
+  if(activePage==='agents')requests.push(fetchResource<Checker[]>('/agents',data=>setAgents(data)));
+  await Promise.all(requests);
+  if(!request.signal.aborted&&requests.length)setLoading(false);
+  await headerRequest;
+  if(request.signal.aborted)return;
   setLoading(false);
+  if(errors.length)setLoadError(handleFailure(errors[0]));
+  else {setLoadError('');setUpdated(new Date());}
  },[handleFailure]);
- const loadTargets=useCallback(async(id:string,quiet=false)=>{const request=++targetRequest.current;if(!quiet)setTargetsLoading(true);try{const data=await api<Target[]>(`/pools/${id}/targets`);if(request===targetRequest.current&&selectedRef.current===id)setTargets(data);}catch(error){if(request===targetRequest.current&&selectedRef.current===id)setNotice({message:handleFailure(error),error:true});}finally{if(request===targetRequest.current&&selectedRef.current===id)setTargetsLoading(false);}},[handleFailure]);
- const loadEvents=useCallback(async(quiet=false)=>{const request=++eventRequest.current;if(!quiet)setEventLoading(true);const query=new URLSearchParams({limit:page==='overview'?'8':'100'});if(page==='events'){if(eventLevel)query.set('level',eventLevel);if(eventType)query.set('type',eventType);if(eventPool)query.set('pool_id',eventPool);}try{const data=await api<GuardEvent[]>(`/events?${query}`);if(request===eventRequest.current){setEvents(data);setEventError('');}}catch(error){if(request===eventRequest.current)setEventError(handleFailure(error));}finally{if(request===eventRequest.current)setEventLoading(false);}},[page,eventLevel,eventType,eventPool,handleFailure]);
- useEffect(()=>{if(user)void load();},[user,load]);
- useEffect(()=>{if(user&&(page==='overview'||page==='events'))void loadEvents();},[user,page,loadEvents]);
- useEffect(()=>{setTargets([]);if(user&&selectedId)void loadTargets(selectedId);},[user,selectedId,loadTargets]);
- useEffect(()=>{if(!user)return;const id=window.setInterval(()=>{if(document.visibilityState!=='visible')return;void load(true);if(selectedId)void loadTargets(selectedId,true);if(page==='overview'||page==='events')void loadEvents(true);if(page==='replacements')void reloadReplacements(true);if(page==='servers')void reloadServerOrders(true);},20000);return()=>window.clearInterval(id);},[user,page,selectedId,load,loadTargets,loadEvents,reloadReplacements,reloadServerOrders]);
- useEffect(()=>{const listener=()=>setPage(pageFromHash(window.location.hash));window.addEventListener('hashchange',listener);return()=>window.removeEventListener('hashchange',listener);},[]);
- const navigate=(value:Page)=>{setPage(value);window.location.hash=value;setMobileOpen(false);};
- const refresh=async()=>{if(page==='replacements'){await Promise.all([load(),reloadReplacements()]);return;}if(page==='servers'){serverOrders.refreshOptions();await Promise.all([load(),reloadServerOrders()]);return;}await load();if(selectedId)await loadTargets(selectedId);if(page==='overview'||page==='events')await loadEvents();};
- const refreshAfterError=async()=>{await load(true);if(selectedId)await loadTargets(selectedId,true);};
- const run=async(key:string,action:()=>Promise<unknown>,message:string|((result:unknown)=>string))=>{setBusyKeys(previous=>new Set(previous).add(key));try{const result=await action();setNotice({message:typeof message==='function'?message(result):message,error:false});await load(true);if(selectedId)await loadTargets(selectedId,true);if(page==='overview'||page==='events')await loadEvents(true);}catch(error){setNotice({message:handleFailure(error),error:true});if(!(error instanceof ApiError&&error.status===401))await refreshAfterError();}finally{setBusyKeys(previous=>{const next=new Set(previous);next.delete(key);return next;});}};
- const checkPool=(pool:Pool)=>run(`${pool.id}-check`,()=>api(`/pools/${pool.id}/check`,json('POST')),'Проверка поставлена в очередь. Каждый чекер выполнит проверку после следующего опроса панели.');
- const signOut=async()=>{setBusyKeys(previous=>new Set(previous).add('logout'));try{await api('/auth/logout',json('POST'));invalidateRequests();setUser(null);setOverview(null);setPools([]);setSelectedId(null);setTargets([]);setEvents([]);setSettings(null);setNotice(null);setLoadError('');setEventLevel('');setEventType('');setEventPool('');}catch(error){setNotice({message:handleFailure(error),error:true});}finally{setBusyKeys(previous=>{const next=new Set(previous);next.delete('logout');return next;});}};
- const openPool=(pool:Pool)=>{setSelectedId(pool.id);navigate('pools');};
+
+ const loadTargets=useCallback(async(id:string,quiet=false)=>{
+  if(routeRef.current.poolId!==id||selectedRef.current!==id)return;
+  targetRequest.current?.abort();
+  const request=new AbortController();
+  targetRequest.current=request;
+  if(!quiet)setTargetData(previous=>({poolId:id,items:previous?.poolId===id?previous.items:[],error:'',loading:true}));
+  try{
+   const data=await api<Target[]>(`/pools/${encodeURIComponent(id)}/targets`,{signal:request.signal});
+   if(!request.signal.aborted)setTargetData({poolId:id,items:data,error:'',loading:false});
+  }catch(error){
+   if(request.signal.aborted)return;
+   const message=handleFailure(error);
+   if(!request.signal.aborted)setTargetData(previous=>({poolId:id,items:previous?.poolId===id?previous.items:[],error:message,loading:false}));
+  }finally{
+   if(targetRequest.current===request)targetRequest.current=null;
+  }
+ },[handleFailure]);
+
+ const loadRecentEvents=useCallback(async(quiet=false)=>{
+  if(routeRef.current.page!=='overview')return;
+  eventRequest.current?.abort();
+  const request=new AbortController();
+  eventRequest.current=request;
+  if(!quiet)setEventLoading(true);
+  try{
+   const data=await api<GuardEvent[]>('/events?limit=8',{signal:request.signal});
+   if(!request.signal.aborted){setEvents(data);setEventError('');}
+  }catch(error){
+   if(!request.signal.aborted)setEventError(handleFailure(error));
+  }finally{
+   if(!request.signal.aborted)setEventLoading(false);
+  }
+ },[handleFailure]);
+ const refreshEvents=useCallback((quiet=false)=>{
+  if(routeRef.current.page==='overview')return loadRecentEvents(quiet);
+  if(routeRef.current.page==='events')setEventsRefresh(previous=>({sequence:previous.sequence+1,quiet}));
+ },[loadRecentEvents]);
+
+ useEffect(()=>{if(user)void load();return()=>dashboardRequest.current?.abort();},[user,page,load]);
+ useEffect(()=>{if(user&&page==='overview')void loadRecentEvents();return()=>eventRequest.current?.abort();},[user,page,loadRecentEvents]);
+ useEffect(()=>{
+  setTargetData(null);
+  if(user&&selectedId)void loadTargets(selectedId);
+  return()=>targetRequest.current?.abort();
+ },[user,selectedId,loadTargets]);
+
+ const updateRoute=useCallback((hash:string)=>{
+  const next=routeFromHash(hash);
+  const previous=routeRef.current;
+  if(previous.page!==next.page){dashboardRequest.current?.abort();eventRequest.current?.abort();}
+  if(previous.poolId!==next.poolId)targetRequest.current?.abort();
+  routeRef.current=next;
+  setRoute(next);
+  setMobileOpen(false);
+ },[]);
+ useEffect(()=>{
+  const listener=()=>updateRoute(window.location.hash);
+  window.addEventListener('hashchange',listener);
+  return()=>window.removeEventListener('hashchange',listener);
+ },[updateRoute]);
+ const navigate=(hash:string)=>{
+  updateRoute(hash);
+  window.location.hash=hash;
+ };
+
+ useEffect(()=>{
+  const media=window.matchMedia?.(mobileQuery);
+  if(!media)return;
+  const update=()=>{
+   setMobileViewport(media.matches);
+   if(!media.matches)setMobileOpen(false);
+  };
+  update();
+  media.addEventListener('change',update);
+  return()=>media.removeEventListener('change',update);
+ },[]);
+ useEffect(()=>{
+  if(!mobileOpen||!user)return;
+  closeMenuButton.current?.focus();
+  const overflow=document.body.style.overflow;
+  document.body.style.overflow='hidden';
+  const onKeyDown=(event:KeyboardEvent)=>{
+   if(event.key==='Escape'){
+    event.preventDefault();
+    setMobileOpen(false);
+   }
+   if(event.key==='Tab'){
+    const controls=sidebar.current?.querySelectorAll<HTMLElement>('a[href],button:not(:disabled)');
+    if(!controls?.length)return;
+    const first=controls[0],last=controls[controls.length-1];
+    const wrap=event.shiftKey?document.activeElement===first:document.activeElement===last;
+    if(wrap||!sidebar.current?.contains(document.activeElement)){
+     event.preventDefault();
+     (event.shiftKey?last:first).focus();
+    }
+   }
+  };
+  document.addEventListener('keydown',onKeyDown);
+  return()=>{
+   document.body.style.overflow=overflow;
+   document.removeEventListener('keydown',onKeyDown);
+   mobileMenu.current?.focus();
+  };
+ },[mobileOpen,user]);
+
+ const refreshVisibleTargets=(quiet=false)=>{
+  const id=selectedRef.current;
+  if(id)return loadTargets(id,quiet);
+ };
+ const refresh=async()=>{
+  if(page==='servers')serverOrders.refreshOptions();
+  if(page==='settings')setSettingsRevision(value=>value+1);
+  await Promise.all([
+   load(),refreshVisibleTargets(),refreshEvents(),
+   page==='replacements'?reloadReplacements():undefined,
+   page==='servers'?reloadServerOrders():undefined,
+  ]);
+ };
+ const refreshAfterError=async()=>{await Promise.all([load(true),refreshVisibleTargets(true)]);};
+ const run=async(key:string,action:()=>Promise<unknown>,message:string|((result:unknown)=>string))=>{
+  setBusyKeys(previous=>new Set(previous).add(key));
+  try{
+   const result=await action();
+   setNotice({message:typeof message==='function'?message(result):message,error:false});
+   await Promise.all([load(true),refreshVisibleTargets(true),refreshEvents(true)]);
+  }catch(error){
+   setNotice({message:handleFailure(error),error:true});
+   if(!(error instanceof ApiError&&error.status===401))await refreshAfterError();
+  }finally{
+   setBusyKeys(previous=>{const next=new Set(previous);next.delete(key);return next;});
+  }
+ };
+ const checkPool=(pool:Pool)=>run(`${pool.id}-check`,async()=>{
+  const receipt=await api<PoolCheckReceipt>(`/pools/${encodeURIComponent(pool.id)}/check`,json('POST'));
+  if(receipt?.started_at&&Array.isArray(receipt.expected_agents)&&Array.isArray(receipt.target_ids)){
+   setManualChecks(previous=>new Map(previous).set(pool.id,{...receipt,waitUntil:Date.now()+120000}));
+  }
+ },'Ручная проверка запрошена.');
+ const signOut=async()=>{
+  setBusyKeys(previous=>new Set(previous).add('logout'));
+  try{
+   await api('/auth/logout',json('POST'));
+   clearSession();
+   setLoadError('');
+  }catch(error){
+   setNotice({message:handleFailure(error),error:true});
+  }finally{
+   setBusyKeys(previous=>{const next=new Set(previous);next.delete('logout');return next;});
+  }
+ };
+ const openPool=(pool:Pool)=>navigate(poolHash(pool.id));
+ useEffect(()=>{
+  if(!user)return;
+  const id=window.setInterval(()=>{
+   if(document.visibilityState!=='visible')return;
+   void load(true);
+   void refreshEvents(true);
+   if(page==='replacements')void reloadReplacements(true);
+   if(page==='servers')void reloadServerOrders(true);
+  },20000);
+  return()=>window.clearInterval(id);
+ },[user,page,load,refreshEvents,reloadReplacements,reloadServerOrders]);
+ useEffect(()=>{
+  if(!user||!selectedId)return;
+  const id=window.setInterval(()=>{
+   if(document.visibilityState==='visible'&&(!targetRequest.current||targetRequest.current.signal.aborted))void loadTargets(selectedId,true);
+  },waitingForChecks?5000:20000);
+  return()=>window.clearInterval(id);
+ },[user,selectedId,waitingForChecks,loadTargets]);
+ useEffect(()=>{
+  if(!manualCheck||!waitingForChecks)return;
+  const timeout=window.setTimeout(()=>setCheckClock(Date.now()),Math.max(0,manualCheck.waitUntil-Date.now()));
+  return()=>window.clearTimeout(timeout);
+ },[manualCheck,waitingForChecks]);
  const togglePool=(pool:Pool)=>{if(pool.automation_enabled){void run(pool.id,()=>api(`/pools/${pool.id}`,json('PATCH',{automation_enabled:false})),'Автоматизация приостановлена. Проверки продолжаются.');}else setModal({type:'confirm',title:'Включить автоматизацию?',description:`DNS Guard будет исключать и возвращать A-записи ${pool.hostname} по результатам проверок из РФ. Последняя A-запись останется защищённой. Для запуска нужны профиль и хотя бы один узел.`,label:'Включить автоматизацию',action:()=>api(`/pools/${pool.id}`,json('PATCH',{automation_enabled:true}))});};
  const deletePool=(pool:Pool)=>setModal({type:'confirm',title:'Удалить DNS-пул?',description:`Пул «${pool.name}» (${pool.hostname}), его узлы и профиль будут удалены из панели. Проверки и автоматизация остановятся. A-записи в Cloudflare сохранятся.`,label:'Удалить пул',danger:true,deletedPoolId:pool.id,successMessage:'Пул удалён. A-записи в Cloudflare сохранены.',action:()=>api(`/pools/${pool.id}`,json('DELETE'))});
  const targetAction=(target:Target,action:'edit'|'disable'|'delete'|'enable')=>{
@@ -88,33 +302,34 @@ export default function App(){
  if(authLoading)return <div className="auth-page"><div className="brand"><ShieldCheck size={30}/><span>DNS<span>Guard</span></span></div><Spinner label="Проверка сессии…"/></div>;
  if(!user)return <Login initialError={loadError} onLogin={username=>{setLoadError('');setUser(username);}}/>;
  return <div className="app-shell">
-  {mobileOpen&&<div className="sidebar-shade" onClick={()=>setMobileOpen(false)}/>}
-  <aside className={`sidebar ${mobileOpen?'open':''}`}><a className="brand" href="#overview" onClick={()=>navigate('overview')}><div className="brand-mark"><ShieldCheck size={25}/></div><span>DNS<span>Guard</span></span></a><div className="workspace-tag"><span className="tiny-dot"/>Панель управления</div><div className="nav-label">РАБОЧЕЕ ПРОСТРАНСТВО</div><nav aria-label="Основная навигация">{([{id:'overview',icon:LayoutDashboard},{id:'pools',icon:Network},{id:'servers',icon:ServerCog},{id:'replacements',icon:Repeat2},{id:'agents',icon:Server},{id:'events',icon:Terminal},{id:'settings',icon:Cog}] as const).map(item=><button key={item.id} className={`nav-item ${page===item.id?'active':''}`} aria-current={page===item.id?'page':undefined} onClick={()=>{if(item.id==='pools')setSelectedId(null);navigate(item.id);}}><item.icon size={19}/><span>{pageNames[item.id]}</span>{item.id==='pools'&&pools.length>0&&<span className="nav-count">{pools.length}</span>}{item.id==='agents'&&(settings?.agents_total??0)>0&&<span className="nav-count">{settings?.agents_total}</span>}</button>)}</nav><div className="sidebar-bottom"><div className="agent-mini"><div className={`agent-symbol ${overview?.agent_healthy?'online':''}`}><Activity size={19}/></div><div><strong>RU чекеры</strong><span>{checkerCount(overview)}</span></div><span className={`tiny-dot ${overview?.agent_healthy?'':'off'}`}/></div><button className="user-button" onClick={()=>void signOut()} disabled={busyKeys.has('logout')} title="Выйти из системы"><span className="avatar">{user.slice(0,2).toUpperCase()}</span><span><strong>{user}</strong><small>Администратор</small></span><LogOut size={17}/></button><div className="sidebar-footer">DNS Guard <span>v1.0</span></div></div></aside>
-  <main className="main"><header className="topbar"><div className="breadcrumb"><IconButton label="Открыть меню" className="mobile-menu" onClick={()=>setMobileOpen(true)}><Menu size={21}/></IconButton><span>Рабочее пространство</span><ChevronRight size={15}/><strong>{pageNames[page]}</strong></div><div className="topbar-right"><span className="topbar-live"><span className={`tiny-dot ${overview?.agent_healthy?'':'off'}`}/>{checkerCount(overview)}</span><span className="topbar-divider"/><span className="avatar small">{user.slice(0,2).toUpperCase()}</span></div></header>
-   <div className="content"><div className="page-heading"><div><div className="eyebrow">{page==='overview'?'МОНИТОРИНГ И АВТОМАТИЗАЦИЯ':page==='pools'||page==='replacements'||page==='servers'?'ИНФРАСТРУКТУРА':page==='events'?'ИСТОРИЯ ОПЕРАЦИЙ':page==='agents'?'ТОЧКИ ПРОВЕРКИ':'КОНФИГУРАЦИЯ'}</div><h1>{page==='pools'&&selected?selected.name:pageNames[page]}</h1><p>{page==='overview'?'Доступность узлов из РФ. DNS под контролем.':page==='pools'&&selected?selected.hostname:page==='pools'?'Управляйте A-записями и правилами восстановления.':page==='events'?'Проверки, изменения DNS и действия администратора.':page==='agents'?'Управляйте прямыми проверками и проверками через SOCKS5.':page==='replacements'?'Замена серверов UpCloud при блокировке IP.':page==='servers'?'Заказы серверов и шаблоны доменов для DNS-пулов.':'Подключения сервисов и состояние probe-агента.'}</p></div><div className="heading-actions"><button className="button secondary" onClick={()=>void refresh()} aria-label="Обновить" disabled={loading||page==='replacements'&&replacements.loading||page==='servers'&&serverOrders.loading}><RefreshCw size={16} className={loading||page==='replacements'&&replacements.loading||page==='servers'&&serverOrders.loading?'spin':''}/><span>Обновить</span></button>{(page==='overview'||page==='pools'&&!selected)&&<button className="button primary" onClick={()=>setModal({type:'pool'})}><Plus size={17}/>Создать пул</button>}</div></div>
+  {mobileOpen&&<div className="sidebar-shade" aria-hidden="true" onClick={()=>setMobileOpen(false)}/>}
+  <aside id="main-sidebar" ref={sidebar} className={`sidebar ${mobileOpen?'open':''}`} inert={mobileViewport&&!mobileOpen} role={mobileOpen?'dialog':undefined} aria-modal={mobileOpen||undefined} aria-label={mobileOpen?'Меню навигации':undefined}>
+   {mobileOpen&&<button ref={closeMenuButton} className="icon-button sidebar-close" type="button" onClick={()=>setMobileOpen(false)} aria-label="Закрыть меню"><X size={21}/></button>}<a className="brand" href="#overview" onClick={()=>navigate('overview')}><div className="brand-mark"><ShieldCheck size={25}/></div><span>DNS<span>Guard</span></span></a><div className="workspace-tag"><span className="tiny-dot"/>Панель управления</div><div className="nav-label">РАБОЧЕЕ ПРОСТРАНСТВО</div><nav aria-label="Основная навигация">{([{id:'overview',icon:LayoutDashboard},{id:'pools',icon:Network},{id:'servers',icon:ServerCog},{id:'replacements',icon:Repeat2},{id:'agents',icon:Server},{id:'events',icon:Terminal},{id:'settings',icon:Cog}] as const).map(item=><button key={item.id} className={`nav-item ${page===item.id?'active':''}`} aria-current={page===item.id?'page':undefined} onClick={()=>navigate(item.id)}><item.icon size={19}/><span>{pageNames[item.id]}</span>{item.id==='pools'&&(shell?.pools??0)>0&&<span className="nav-count">{shell?.pools}</span>}{item.id==='agents'&&(shell?.agents_total??0)>0&&<span className="nav-count">{shell?.agents_total}</span>}</button>)}</nav><div className="sidebar-bottom"><div className="agent-mini"><div className={`agent-symbol ${shell?.agent_healthy?'online':''}`}><Activity size={19}/></div><div><strong>RU чекеры</strong><span>{shell?checkerCount(shell):'Чекеры: —'}</span></div><span className={`tiny-dot ${shell?.agent_healthy?'':'off'}`}/></div><button className="user-button" onClick={()=>void signOut()} disabled={busyKeys.has('logout')} title="Выйти из системы"><span className="avatar">{user.slice(0,2).toUpperCase()}</span><span><strong>{user}</strong><small>Администратор</small></span><LogOut size={17}/></button><div className="sidebar-footer">DNS Guard <span>v1.0</span></div></div></aside>
+  <main className="main" inert={mobileOpen}><header className="topbar"><div className="breadcrumb"><button ref={mobileMenu} className="icon-button mobile-menu" type="button" aria-label="Открыть меню" aria-controls="main-sidebar" aria-expanded={mobileOpen} onClick={()=>setMobileOpen(true)}><Menu size={21}/></button><span>Рабочее пространство</span><ChevronRight size={15}/><strong>{pageNames[page]}</strong></div><div className="topbar-right"><span className="topbar-live"><span className={`tiny-dot ${shell?.agent_healthy?'':'off'}`}/>{shell?checkerCount(shell):'Чекеры: —'}</span><span className="topbar-divider"/><span className="avatar small">{user.slice(0,2).toUpperCase()}</span></div></header>
+   <div className="content"><div className="page-heading"><div><div className="eyebrow">{page==='overview'?'МОНИТОРИНГ И АВТОМАТИЗАЦИЯ':page==='pools'||page==='replacements'||page==='servers'?'ИНФРАСТРУКТУРА':page==='events'?'ИСТОРИЯ ОПЕРАЦИЙ':page==='agents'?'ТОЧКИ ПРОВЕРКИ':'КОНФИГУРАЦИЯ'}</div><h1>{page==='pools'&&selected?selected.name:pageNames[page]}</h1><p>{page==='overview'?'Доступность узлов из РФ. DNS под контролем.':page==='pools'&&selected?selected.hostname:page==='pools'?'Управляйте A-записями и правилами восстановления.':page==='events'?'Проверки, изменения DNS и действия администратора.':page==='agents'?'Управляйте прямыми проверками и проверками через SOCKS5.':page==='replacements'?'Замена серверов UpCloud при блокировке IP.':page==='servers'?'Заказы серверов и шаблоны доменов для DNS-пулов.':'Подключения сервисов и состояние probe-агента.'}</p></div><div className="heading-actions"><button className="button secondary" onClick={()=>void refresh()} aria-label="Обновить" disabled={loading||page==='replacements'&&replacements.loading||page==='servers'&&serverOrders.loading}><RefreshCw size={16} className={loading||page==='replacements'&&replacements.loading||page==='servers'&&serverOrders.loading?'spin':''}/><span>Обновить</span></button>{(page==='overview'||page==='pools'&&!poolId)&&<button className="button primary" onClick={()=>setModal({type:'pool'})}><Plus size={17}/>Создать пул</button>}</div></div>
     {notice&&<div className={`notice ${notice.error?'error':'success'}`} role={notice.error?'alert':'status'}>{notice.error?<TriangleAlert size={18}/>:<CheckCircle2 size={18}/>}<span>{notice.message}</span><IconButton label="Закрыть уведомление" onClick={()=>setNotice(null)}><X size={16}/></IconButton></div>}
     {loadError&&<ErrorBox message={loadError}/>}
-    {loading&&!overview&&<div className="panel initial-loading"><Spinner label="Загрузка панели…"/></div>}
-    {page==='agents'&&<AgentsPage agents={settings?.agents??[]} loading={loading} onAuthError={handleFailure}/>}
+    {loading&&(page==='overview'&&!overview||page==='pools'&&!poolsLoaded||page==='settings'&&!settings)&&<div className="panel initial-loading"><Spinner label="Загрузка…"/></div>}
+    {page==='agents'&&<AgentsPage agents={agents} loading={loading} onAuthError={handleFailure}/>}
     {page==='servers'&&<ServerOrdersPage {...serverOrders} onAuthError={handleFailure}/>}
     {page==='replacements'&&<ReplacementsPage {...replacements} onAuthError={handleFailure}/>}
     {page==='overview'&&<><div className="metric-grid"><Metric label="DNS-пулы" value={overview?.pools} icon={<Network size={20}/>} detail="Общие профили подключения"/><Metric label="Узлы в мониторинге" value={overview?.targets} icon={<Server size={20}/>} detail="Проверки через VLESS"/><Metric label="Доступные узлы" value={overview?.healthy} icon={<HeartPulse size={20}/>} detail="Свежая успешная проверка" tone="green"/><Metric label="Исключены из DNS" value={overview?.excluded} icon={<ShieldOff size={20}/>} detail="Проверки продолжаются" tone="amber"/></div>
      <div className={`agent-banner ${overview?.agent_healthy?'healthy':''}`}><div className="agent-banner-icon"><Activity size={22}/></div><div><h3>{overview?.agent_healthy?'Проверки из России доступны':overview?.agent_last_seen?'Нет готовых чекеров':'Подключите чекер в России'}</h3><p>{overview?.agent_healthy?'Каждый чекер проверяет все IP через VLESS. Ошибки любого чекера учитываются независимо; исключённые узлы остаются под наблюдением.':overview?.agent_last_seen?'Нет чекеров с доступной контрольной связью. Это не считается сбоем узлов.':'До подключения чекера результаты проверок не появятся. Настройте чекер и общий профиль пула.'}</p></div><button className="button text" onClick={()=>navigate('agents')}>Состояния чекеров<ArrowRight size={16}/></button></div>
-     <div className="panel"><PanelHeading title="DNS-пулы" description="Один hostname · общий профиль · независимые узлы" action={<button className="button text" onClick={()=>{setSelectedId(null);navigate('pools');}}>Все пулы<ArrowRight size={16}/></button>}/><PoolTable pools={pools} onSelect={openPool} onEdit={pool=>setModal({type:'pool',pool})} onToggle={togglePool} onDelete={deletePool} busy={busyKeys} onCreate={()=>setModal({type:'pool'})}/></div>
+     <div className="panel"><PanelHeading title="DNS-пулы" description="Один hostname · общий профиль · независимые узлы" action={<button className="button text" onClick={()=>navigate('pools')}>Все пулы<ArrowRight size={16}/></button>}/><PoolTable pools={pools} onSelect={openPool} onEdit={pool=>setModal({type:'pool',pool})} onToggle={togglePool} onDelete={deletePool} busy={busyKeys} onCreate={()=>setModal({type:'pool'})}/></div>
      <div className="overview-bottom"><div className="panel events-panel"><PanelHeading title="Последние события" action={<button className="button text" onClick={()=>navigate('events')}>Открыть журнал<ArrowRight size={16}/></button>}/>{eventError?<ErrorBox message={eventError}/>:eventLoading&&!events.length?<div className="panel-loading"><Spinner/></div>:<EventList events={events} pools={pools} compact/>}</div><div className="panel integrations-panel"><PanelHeading title="Подключения"/><IntegrationRow name="Cloudflare" detail="Управление A-записями" icon={<Cloud size={22}/>} configured={overview?.cloudflare_configured}/><IntegrationRow name="Remnawave" detail="Импорт узлов и хостов" icon={<Network size={22}/>} configured={overview?.remnawave_configured}/><div className="integration-footer"><div className="info-note"><ShieldCheck size={17}/><p>Последняя A-запись защищена от автоматического и ручного удаления.</p></div><button className="button secondary full" onClick={()=>navigate('settings')}><Settings2 size={16}/>Настроить подключения</button></div></div></div>
     </>}
-    {page==='pools'&&(selected?<><button className="back-link" onClick={()=>setSelectedId(null)}><ArrowLeft size={16}/>Все DNS-пулы</button><PoolDetail pool={selected} targets={targets} targetsLoading={targetsLoading} busy={busyKeys} onEdit={()=>setModal({type:'pool',pool:selected})} onDelete={()=>deletePool(selected)} onProfile={()=>setModal({type:'profile',pool:selected})} onAdd={()=>setModal({type:'target',pool:selected})} onImport={()=>setModal({type:'import',pool:selected})} onToggle={()=>togglePool(selected)} onSync={()=>void run(`${selected.id}-sync`,()=>api<{added:number;message:string}>(`/pools/${selected.id}/sync`,json('POST')),result=>{const data=result as {added:number;message:string};return `${data.message} Добавлено: ${data.added}.`;})} onCheck={()=>{if(selected.profile_configured)void checkPool(selected);else setModal({type:'profile',pool:selected,checkAfterSave:true});}} onTargetAction={targetAction}/></>:<div className="panel"><PanelHeading title="Ваши DNS-пулы" description="Автоматизация включается отдельно для каждого пула"/><PoolTable pools={pools} onSelect={openPool} onEdit={pool=>setModal({type:'pool',pool})} onToggle={togglePool} onDelete={deletePool} busy={busyKeys} onCreate={()=>setModal({type:'pool'})}/></div>)}
-    {page==='events'&&<div className="panel"><PanelHeading title="Журнал" description="Последние 100 событий по выбранным фильтрам"/><div className="filters"><SlidersHorizontal size={18}/><label className="sr-only" htmlFor="level-filter">Уровень</label><select id="level-filter" value={eventLevel} onChange={e=>setEventLevel(e.target.value)}><option value="">Все уровни</option><option value="info">Информация</option><option value="warning">Предупреждения</option><option value="error">Ошибки</option></select><label className="sr-only" htmlFor="type-filter">Тип события</label><select id="type-filter" value={eventType} onChange={e=>setEventType(e.target.value)}><option value="">Все типы событий</option><option value="check">Проверки</option><option value="dns">DNS</option><option value="manual">Действия пользователя</option><option value="system">Система</option></select><label className="sr-only" htmlFor="pool-filter">Пул</label><select id="pool-filter" value={eventPool} onChange={e=>setEventPool(e.target.value)}><option value="">Все пулы</option>{pools.map(pool=><option key={pool.id} value={pool.id}>{pool.name}</option>)}</select>{(eventLevel||eventType||eventPool)&&<button className="button text" onClick={()=>{setEventLevel('');setEventType('');setEventPool('');}}>Сбросить<X size={14}/></button>}</div>{eventError&&<ErrorBox message={eventError}/>}<div aria-busy={eventLoading}>{eventLoading?<div className="panel-loading"><Spinner label="Загрузка событий…"/></div>:<EventList events={events} pools={pools}/>}</div></div>}
-    {page==='settings'&&settings&&<SettingsView settings={settings} onSaved={async message=>{setNotice({message,error:false});await load(true);}} onAuthError={handleFailure}/>}
+    {page==='pools'&&poolsLoaded&&(selected?<><button className="back-link" onClick={()=>navigate('pools')}><ArrowLeft size={16}/>Все DNS-пулы</button><PoolDetail key={selected.id} pool={selected} targets={targets} targetsLoading={targetsLoading} targetsError={currentTargets?.error} targetId={targetId} checkProgress={manualCheck&&checkSummary&&<PoolCheckProgress run={manualCheck} summary={checkSummary} waiting={waitingForChecks}/>} busy={busyKeys} onEdit={()=>setModal({type:'pool',pool:selected})} onDelete={()=>deletePool(selected)} onProfile={()=>setModal({type:'profile',pool:selected})} onAdd={()=>setModal({type:'target',pool:selected})} onImport={()=>setModal({type:'import',pool:selected})} onToggle={()=>togglePool(selected)} onSync={()=>void run(`${selected.id}-sync`,()=>api<{added:number;message:string}>(`/pools/${selected.id}/sync`,json('POST')),result=>{const data=result as {added:number;message:string};return `${data.message} Добавлено: ${data.added}.`;})} onCheck={()=>{if(selected.profile_configured)void checkPool(selected);else setModal({type:'profile',pool:selected,checkAfterSave:true});}} onTargetAction={targetAction}/></>:poolId?<div className="panel"><Empty title="DNS-пул не найден" description="Возможно, пул удалён." action={<button className="button secondary" onClick={()=>navigate('pools')}>Все DNS-пулы</button>}/></div>:<div className="panel"><PanelHeading title="Ваши DNS-пулы" description="Автоматизация включается отдельно для каждого пула"/><PoolTable pools={pools} onSelect={openPool} onEdit={pool=>setModal({type:'pool',pool})} onToggle={togglePool} onDelete={deletePool} busy={busyKeys} onCreate={()=>setModal({type:'pool'})}/></div>)}
+    {page==='events'&&<EventsPage pools={pools} onAuthError={handleFailure} refresh={eventsRefresh}/>}
+    {page==='settings'&&settings&&<SettingsView settings={settings} providerRevision={settingsRevision} focusProviders={window.location.hash===providerSettingsHash} onSaved={async message=>{setNotice({message,error:false});await load(true);}} onAuthError={handleFailure}/>}
     <footer className="content-footer"><span><ShieldCheck size={14}/>Последняя A-запись всегда под защитой</span><span>{updated?`Данные обновлены в ${updated.toLocaleTimeString('ru-RU')}`:'Ожидаем данные сервера'}</span></footer>
    </div>
   </main>
-  {modal?.type==='pool'&&<PoolForm pool={modal.pool} onClose={()=>setModal(null)} onSaved={async pool=>{setModal(null);setNotice({message:modal.pool?'Настройки пула сохранены.':'Пул создан. Добавьте профиль проверки и узлы.',error:false});await load(true);openPool(pool);}}/>}
+  {modal?.type==='pool'&&<PoolForm pool={modal.pool} onClose={()=>setModal(null)} onSaved={async pool=>{setModal(null);setNotice({message:modal.pool?'Настройки пула сохранены.':'Пул создан. Добавьте профиль проверки и узлы.',error:false});setPools(previous=>previous.some(item=>item.id===pool.id)?previous.map(item=>item.id===pool.id?{...item,...pool}:item):[...previous,pool]);setPoolsLoaded(true);openPool(pool);if(routeRef.current.page===page)await load(true);}}/>}
   {modal?.type==='target'&&<TargetForm key={modal.target?.id||'new'} pool={modal.pool} target={modal.target} onFailure={refreshAfterError} onClose={()=>setModal(null)} onSaved={async()=>{setModal(null);setNotice({message:modal.target?'Изменения узла сохранены.':'Узел добавлен и ожидает проверок. A-запись будет добавлена после успешной серии.',error:false});await load(true);await loadTargets(modal.pool.id);}}/>}
-  {modal?.type==='delete-target'&&<TargetDeleteModal key={modal.target.id} target={modal.target} onClose={()=>setModal(null)} onFailure={refreshAfterError} onDeleted={async deleteDNS=>{setModal(null);setNotice({message:deleteDNS?'Узел и его A-запись удалены.':'Узел удалён из панели. A-запись в Cloudflare сохранена.',error:false});await load(true);if(selectedId)await loadTargets(selectedId,true);await loadEvents(true);}}/>}
+  {modal?.type==='delete-target'&&<TargetDeleteModal key={modal.target.id} target={modal.target} onClose={()=>setModal(null)} onFailure={refreshAfterError} onDeleted={async deleteDNS=>{setModal(null);setNotice({message:deleteDNS?'Узел и его A-запись удалены.':'Узел удалён из панели. A-запись в Cloudflare сохранена.',error:false});if(routeRef.current.targetId===modal.target.id&&routeRef.current.poolId)navigate(poolHash(routeRef.current.poolId));await Promise.all([load(true),refreshVisibleTargets(true),refreshEvents(true)]);}}/>}
   {modal?.type==='import'&&<ImportForm pool={modal.pool} onFailure={refreshAfterError} onClose={()=>setModal(null)} onSaved={async()=>{setModal(null);setNotice({message:'Узел Remnawave добавлен и ожидает проверок перед добавлением A-записи.',error:false});await load(true);await loadTargets(modal.pool.id);}}/>}
   {modal?.type==='profile'&&<ProfileForm pool={modal.pool} checkAfterSave={modal.checkAfterSave} onClose={()=>setModal(null)} onSaved={async()=>{setModal(null);if(modal.checkAfterSave){await checkPool(modal.pool);return;}setNotice({message:'Общий профиль сохранён. Счётчики последовательных проверок сброшены.',error:false});await load(true);await loadTargets(modal.pool.id);}}/>}
-  {modal?.type==='confirm'&&<ConfirmModal data={modal} onFailure={refreshAfterError} onClose={()=>setModal(null)} onDone={async()=>{const deletedId=modal.deletedPoolId;setModal(null);setNotice({message:modal.successMessage||'Действие выполнено.',error:false});if(deletedId){setEventPool(previous=>previous===deletedId?'':previous);if(selectedId===deletedId){selectedRef.current=null;++targetRequest.current;setSelectedId(null);setTargets([]);setTargetsLoading(false);}}await load(true);if(selectedId&&selectedId!==deletedId)await loadTargets(selectedId,true);await loadEvents(true);}}/>}
+  {modal?.type==='confirm'&&<ConfirmModal data={modal} onFailure={refreshAfterError} onClose={()=>setModal(null)} onDone={async()=>{const deletedId=modal.deletedPoolId;setModal(null);setNotice({message:modal.successMessage||'Действие выполнено.',error:false});if(deletedId&&routeRef.current.poolId===deletedId)navigate('pools');await Promise.all([load(true),refreshVisibleTargets(true),refreshEvents(true)]);}}/>}
  </div>;
 }
 
@@ -122,9 +337,19 @@ function Metric({label,value,icon,detail,tone='blue'}:{label:string;value:number
 function PanelHeading({title,description,action}:{title:string;description?:string;action?:ReactNode}){return <div className="panel-heading"><div><h2>{title}</h2>{description&&<p>{description}</p>}</div>{action}</div>}
 function IntegrationRow({name,detail,icon,configured}:{name:string;detail:string;icon:ReactNode;configured?:boolean}){return <div className="integration-row"><div className={`integration-icon ${name==='Cloudflare'?'orange':'purple'}`}>{icon}</div><div><h3>{name}</h3><p>{detail}</p></div><Badge tone={configured?'green':'muted'}>{configured?'Подключён':'Не настроен'}</Badge></div>}
 export function PoolTable({pools,onSelect,onEdit,onToggle,onDelete,busy,onCreate}:{pools:Pool[];onSelect:(pool:Pool)=>void;onEdit:(pool:Pool)=>void;onToggle:(pool:Pool)=>void;onDelete:(pool:Pool)=>void;busy:Set<string>;onCreate:()=>void}){if(!pools.length)return <Empty title="Первый пул — начало мониторинга" description="Объедините узлы под одним DNS-именем. Добавьте общий VLESS-профиль, а затем включите автоматизацию." action={<button className="button primary" onClick={onCreate}><Plus size={16}/>Создать DNS-пул</button>}/>;return <div className="table-scroll"><table className="pool-table"><thead><tr><th>Пул / DNS-имя</th><th>Активные узлы</th><th>Автоматизация</th><th>Профиль</th><th>Интервал</th><th>Пороги сбой / успех</th><th><span className="sr-only">Действия</span></th></tr></thead><tbody>{pools.map(pool=><tr key={pool.id}><td><button className="pool-name" onClick={()=>onSelect(pool)}><span className="pool-symbol"><Globe size={19}/></span><span><strong>{pool.name}</strong><small className="mono">{pool.hostname}</small></span><ChevronRight size={16}/></button></td><td><PoolTargetCount summary={pool.target_summary}/></td><td><Badge tone={pool.automation_enabled?'green':'amber'}>{pool.automation_enabled?'Включена':'На паузе'}</Badge></td><td><span className={`profile-label ${pool.profile_configured?'configured':''}`}>{pool.profile_configured?<CheckCircle2 size={14}/>:<KeyRound size={14}/>} {pool.profile_configured?'Настроен':'Не задан'}</span></td><td><span className="table-secondary">{pool.interval_seconds} сек.</span></td><td><span className="mono threshold"><span>{pool.failure_threshold}</span><span>/</span><span>{pool.recovery_threshold}</span></span></td><td><div className="row-actions"><IconButton label="Настройки пула" onClick={()=>onEdit(pool)}><Settings2 size={16}/></IconButton><IconButton label={pool.automation_enabled?'Поставить автоматизацию на паузу':'Включить автоматизацию'} onClick={()=>onToggle(pool)} disabled={busy.has(pool.id)}>{busy.has(pool.id)?<LoaderCircle className="spin" size={16}/>:pool.automation_enabled?<Pause size={16}/>:<Play size={16}/>}</IconButton><IconButton className="danger-hover" label="Удалить пул" onClick={()=>onDelete(pool)} disabled={busy.has(pool.id)}><Trash2 size={16}/></IconButton></div></td></tr>)}</tbody></table></div>}
-function EventList({events,pools,compact=false}:{events:GuardEvent[];pools:Pool[];compact?:boolean}){if(!events.length)return <Empty icon={<Terminal size={27}/>} title="Пока нет событий" description="Здесь появятся результаты проверок, изменения DNS и действия администратора."/>;return <div className={`event-list ${compact?'compact':''}`}>{events.map(event=><article className="event" key={event.id}><span className={`event-icon ${event.level}`}>{event.level==='error'?<TriangleAlert size={17}/>:event.type==='dns'?<Globe size={17}/>:event.type==='check'?<Activity size={17}/>:event.type==='manual'?<Settings2 size={17}/>:<Info size={17}/>}</span><div className="event-main"><div className="event-message">{event.message}</div><div className="event-meta"><span className={`level-label ${event.level}`}>{event.level==='info'?'Информация':event.level==='warning'?'Предупреждение':'Ошибка'}</span><span>·</span><span>{({check:'Проверка',dns:'DNS',manual:'Вручную',system:'Система'} as const)[event.type]}</span>{event.pool_id&&<><span>·</span><span>{pools.find(pool=>pool.id===event.pool_id)?.name||'Пул удалён'}</span></>}</div></div><time dateTime={event.created_at}>{date(event.created_at)}</time></article>)}</div>}
-export function PoolDetail({pool,targets,targetsLoading,busy,onEdit,onDelete,onProfile,onAdd,onImport,onToggle,onSync,onCheck,onTargetAction}:{pool:Pool;targets:Target[];targetsLoading:boolean;busy:Set<string>;onEdit:()=>void;onDelete:()=>void;onProfile:()=>void;onAdd:()=>void;onImport:()=>void;onToggle:()=>void;onSync:()=>void;onCheck:()=>void;onTargetAction:(target:Target,action:'edit'|'disable'|'delete'|'enable')=>void}){
- const [search,setSearch]=useState(''),[status,setStatus]=useState('');const filtered=targets.filter(target=>(!status||target.status===status)&&`${target.name} ${target.ip}`.toLowerCase().includes(search.toLowerCase()));
+export function PoolDetail({pool,targets,targetsLoading,targetsError,targetId,checkProgress,busy,onEdit,onDelete,onProfile,onAdd,onImport,onToggle,onSync,onCheck,onTargetAction}:{pool:Pool;targets:Target[];targetsLoading:boolean;targetsError?:string;targetId?:string;checkProgress?:ReactNode;busy:Set<string>;onEdit:()=>void;onDelete:()=>void;onProfile:()=>void;onAdd:()=>void;onImport:()=>void;onToggle:()=>void;onSync:()=>void;onCheck:()=>void;onTargetAction:(target:Target,action:'edit'|'disable'|'delete'|'enable')=>void}){
+ const [search,setSearch]=useState(''),[status,setStatus]=useState('');
+ const filtered=targets.filter(target=>(!status||target.status===status)&&`${target.name} ${target.ip}`.toLowerCase().includes(search.toLowerCase()));
+ const focusedTarget=useRef<string|undefined>(undefined);
+ useEffect(()=>{setSearch('');setStatus('');focusedTarget.current=undefined;},[targetId]);
+ useEffect(()=>{
+  if(!targetId||targetsLoading||focusedTarget.current===targetId)return;
+  const node=document.getElementById(targetAnchorId(targetId));
+  if(!node)return;
+  focusedTarget.current=targetId;
+  node.focus({preventScroll:true});
+  node.scrollIntoView?.({block:'nearest'});
+ },[targetId,targetsLoading,filtered]);
  return <><div className="pool-controls panel"><div><Badge tone={pool.automation_enabled?'green':'amber'}>{pool.automation_enabled?'Автоматизация включена':'Автоматизация на паузе'}</Badge><p>{pool.automation_enabled?'Проверки продолжаются и для автоматически исключённых узлов.':'Проверяйте узлы до включения Guard. Автоматические изменения DNS отключены. Управление хостами Remnawave на паузе.'}</p></div><div className="pool-control-actions"><button className="button secondary" onClick={onEdit}><Settings2 size={16}/>Настройки пула</button><button className="button secondary" onClick={onProfile}><KeyRound size={16}/>{pool.profile_configured?'Заменить профиль':'Задать профиль'}</button><button className={`button ${pool.automation_enabled?'secondary':'primary'}`} onClick={onToggle} disabled={busy.has(pool.id)}>{pool.automation_enabled?<Pause size={16}/>:<Play size={16}/>} {pool.automation_enabled?'Пауза':'Включить'}</button><button className="button secondary danger-hover" onClick={onDelete} disabled={busy.has(pool.id)}><Trash2 size={16}/>Удалить пул</button></div></div>
  <div className="pool-stat-strip"><div><span>TTL новых записей</span><strong>{pool.ttl===1?'Auto':`${pool.ttl} сек.`}</strong></div><div><span>Интервал проверки</span><strong>{pool.interval_seconds} сек.</strong></div><div><span>Исключение после</span><strong>{pool.failure_threshold} сбоев подряд</strong></div><div><span>Возврат после</span><strong>{pool.recovery_threshold} успехов подряд</strong></div><div><span>Общий профиль</span><strong className={pool.profile_configured?'text-green':'text-amber'}>{pool.profile_configured?'Настроен':'Не настроен'}</strong></div></div>
  <div className="info-note"><ShieldCheck size={17}/><p>{pool.disable_host_when_all_down?'При отказе всех нод хост Remnawave отключается. Последний IP сохраняется; после восстановления хост включается.':'При отказе всех нод последний IP сохраняется, хост Remnawave остаётся включённым.'}{typeof pool.remnawave_host_disabled==='boolean'&&<><br/>Последнее подтверждённое состояние: <strong>{pool.remnawave_host_disabled?'Хост Remnawave отключён':'Хост Remnawave включён'}</strong>.</>}</p></div>
@@ -133,7 +358,10 @@ export function PoolDetail({pool,targets,targetsLoading,busy,onEdit,onDelete,onP
  {!!pool.dns_drift_count&&<div className="info-banner"><TriangleAlert size={19}/><p>Обнаружены расхождения DNS: {pool.dns_drift_count}. Последняя сверка: {date(pool.dns_checked_at)}. Проверьте записи в Cloudflare или выполните синхронизацию.</p></div>}
  {!pool.profile_configured&&<div className="info-banner"><KeyRound size={19}/><p>Для проверки нужен общий VLESS- или Hysteria2-профиль. Нажмите «Проверить сейчас», чтобы задать его и запустить проверку каждого IP. Включать автоматизацию не требуется.</p><button className="button text" onClick={onProfile}>Настроить<ArrowRight size={16}/></button></div>}
  <div className="panel"><PanelHeading title={`Узлы пула · ${targets.length}`} description="DNS-only A-записи · проверки из РФ через VLESS / Hysteria2" action={<div className="heading-actions"><button className="button secondary" onClick={onCheck} disabled={targetsLoading||!targets.some(target=>target.manual_enabled)||busy.has(`${pool.id}-check`)} title={!targets.some(target=>target.manual_enabled)?'Добавьте или включите хотя бы один узел':undefined}>{busy.has(`${pool.id}-check`)?<LoaderCircle className="spin" size={16}/>:<Zap size={16}/>}Проверить сейчас</button><button className="button primary" onClick={onAdd}><Plus size={17}/>Добавить узел</button></div>}/><div className="target-toolbar"><div className="search-input"><Search size={16}/><input aria-label="Поиск узлов" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Название или IP-адрес"/></div><select aria-label="Статус узла" value={status} onChange={e=>setStatus(e.target.value)}><option value="">Все статусы</option>{Object.entries(statusNames).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select><div className="import-actions"><button className="button text" onClick={onImport}><Network size={16}/>Из Remnawave</button><button className="button text" onClick={onSync} disabled={busy.has(`${pool.id}-sync`)}>{busy.has(`${pool.id}-sync`)?<LoaderCircle className="spin" size={16}/>:<ArrowDownToLine size={16}/>}Из Cloudflare</button></div></div>
- {targetsLoading?<div className="panel-loading"><Spinner label="Загрузка узлов…"/></div>:!targets.length?<Empty icon={<Server size={28}/>} title="В пуле пока нет узлов" description="Добавьте публичный IPv4 вручную, импортируйте узел Remnawave или существующие A-записи точного DNS-имени из Cloudflare." action={<button className="button secondary" onClick={onAdd}><Plus size={16}/>Добавить первый узел</button>}/>:!filtered.length?<Empty icon={<Search size={26}/>} title="Ничего не найдено" description="Измените запрос или фильтр статуса."/>:<><TargetCards targets={filtered} pool={pool} statusNames={statusNames} onAction={onTargetAction} busy={busy}/><div className="table-scroll target-desktop"><table className="target-table"><thead><tr><th>Узел / IPv4</th><th>Состояние</th><th>A-запись</th><th>Сбой / успех</th><th>Последняя проверка</th><th>Задержка</th><th><span className="sr-only">Действия</span></th></tr></thead><tbody>{filtered.map(target=><tr key={target.id}><td><div className="target-name"><div className={`target-symbol ${target.status}`}><Server size={17}/></div><div><strong>{target.name}</strong><small><TargetIP ip={target.ip}/>{target.remnawave_uuid&&<span title="Импортирован из Remnawave" className="source-tag">RW</span>}</small></div></div></td><td><Badge tone={statusTone(target.status)}>{statusNames[target.status]}</Badge><TargetChecks target={target} pool={pool}/>{target.last_error&&<div className="target-error" title={target.last_error}>{target.last_error}</div>}</td><td><TargetDNS target={target}/></td><td><div className="streak" title="Максимум сбоев среди чекеров / минимум успехов среди активных чекеров. Каждый чекер ведёт отдельную серию."><span className={target.failures?'text-red':''}>{Math.min(target.failures,pool.failure_threshold)}<small>/{pool.failure_threshold}</small></span><span className="streak-divider">/</span><span className={target.successes?'text-green':''}>{Math.min(target.successes,pool.recovery_threshold)}<small>/{pool.recovery_threshold}</small></span></div></td><td><span className="table-date">{date(target.last_checked_at)}</span></td><td><span className="mono table-secondary">{target.last_latency_ms!==null?`${Math.round(target.last_latency_ms)} ms`:'—'}</span></td><td><div className="row-actions"><IconButton label="Редактировать узел" onClick={()=>onTargetAction(target,'edit')} disabled={busy.has(target.id)||!!target.dns_pending_action}><Pencil size={16}/></IconButton><IconButton label={target.manual_enabled?'Отключить узел вручную':'Включить узел'} onClick={()=>onTargetAction(target,target.manual_enabled?'disable':'enable')} disabled={busy.has(target.id)||target.dns_pending_action==='replace_ip'}>{busy.has(target.id)?<LoaderCircle className="spin" size={16}/>:target.manual_enabled?<Pause size={16}/>:<Play size={16}/>}</IconButton><IconButton className="danger-hover" label="Удалить узел из пула" onClick={()=>onTargetAction(target,'delete')} disabled={busy.has(target.id)||target.dns_pending_action==='replace_ip'}><Trash2 size={16}/></IconButton></div></td></tr>)}</tbody></table></div></>}
+ {checkProgress}
+ {targetsError&&<ErrorBox message={targetsError}/>}
+ {targetId&&!targetsLoading&&!targetsError&&!targets.some(target=>target.id===targetId)&&<ErrorBox message="Узел по ссылке не найден в этом пуле."/>}
+ {targetsLoading?<div className="panel-loading"><Spinner label="Загрузка узлов…"/></div>:!targets.length?<Empty icon={<Server size={28}/>} title="В пуле пока нет узлов" description="Добавьте публичный IPv4 вручную, импортируйте узел Remnawave или существующие A-записи точного DNS-имени из Cloudflare." action={<button className="button secondary" onClick={onAdd}><Plus size={16}/>Добавить первый узел</button>}/>:!filtered.length?<Empty icon={<Search size={26}/>} title="Ничего не найдено" description="Измените запрос или фильтр статуса."/>:<TargetCards targets={filtered} pool={pool} statusNames={statusNames} onAction={onTargetAction} busy={busy} targetId={targetId}/>}
  <div className="table-note"><ShieldCheck size={15}/>DNS Guard не удаляет последнюю A-запись. Отключённые вручную узлы не восстанавливаются автоматически.</div></div></>;
 }
 
@@ -188,10 +416,10 @@ export function TargetDeleteModal({target,onClose,onDeleted,onFailure}:{target:T
 
 function ConfirmModal({data,onClose,onDone,onFailure}:{data:Extract<ModalState,{type:'confirm'}>;onClose:()=>void;onDone:()=>Promise<void>;onFailure:()=>Promise<void>}){const [busy,setBusy]=useState(false),[error,setError]=useState('');async function execute(){setBusy(true);setError('');try{await data.action();await onDone();}catch(err){setError(errorMessage(err));await onFailure();}finally{setBusy(false);}}return <Modal title={data.title} onClose={onClose} busy={busy}><div className="modal-body">{error&&<ErrorBox message={error}/>}<div className={`confirm-icon ${data.danger?'danger':''}`}>{data.danger?<TriangleAlert size={28}/>:<Play size={28}/>}</div><p className="confirm-description">{data.description}</p></div><div className="modal-footer"><button className="button secondary" onClick={onClose} disabled={busy}>{error?'Закрыть':'Отмена'}</button><button className={`button ${data.danger?'danger':'primary'}`} onClick={()=>void execute()} disabled={busy}>{busy?<Spinner label="Выполнение…"/>:data.label}</button></div></Modal>}
 
-function SettingsView({settings,onSaved,onAuthError}:{settings:Settings;onSaved:(message:string)=>Promise<void>;onAuthError:(error:unknown)=>string}){
+function SettingsView({settings,providerRevision,focusProviders,onSaved,onAuthError}:{settings:Settings;providerRevision:number;focusProviders:boolean;onSaved:(message:string)=>Promise<void>;onAuthError:(error:unknown)=>string}){
  const [cfToken,setCfToken]=useState(''),[rwToken,setRwToken]=useState(''),[url,setUrl]=useState(settings.remnawave_url),[busy,setBusy]=useState(''),[error,setError]=useState(''),[testResult,setTestResult]=useState<{service:string;message:string;ok:boolean}|null>(null);
  useEffect(()=>{setUrl(settings.remnawave_url);},[settings.remnawave_url]);
  async function save(event:FormEvent){event.preventDefault();setBusy('save');setError('');setTestResult(null);try{const body:Record<string,string>={};if(cfToken.trim())body.cloudflare_api_token=cfToken.trim();if(url.trim()!==settings.remnawave_url)body.remnawave_url=url.trim();if(rwToken.trim())body.remnawave_api_token=rwToken.trim();await api<Settings>('/settings',json('PUT',body));setCfToken('');setRwToken('');await onSaved('Настройки интеграций сохранены.');}catch(err){setError(onAuthError(err));}finally{setBusy('');}}
  async function test(service:'cloudflare'|'remnawave'){setBusy(service);setError('');setTestResult(null);try{const result=await api<{ok:boolean;message:string}>(`/integrations/${service}/test`,json('POST'));setTestResult({service,message:result.message,ok:result.ok});}catch(err){setTestResult({service,message:onAuthError(err),ok:false});}finally{setBusy('');}}
- return <div className="settings-layout"><div className="settings-form"><form onSubmit={save}><div className="panel"><PanelHeading title="Интеграции" description="Токены не отображаются после сохранения"/>{error&&<ErrorBox message={error}/>}<div className="settings-section"><div className="settings-section-header"><div className="integration-icon orange"><Cloud size={23}/></div><div><h3>Cloudflare</h3><p>Управление DNS-only A-записями</p></div><Badge tone={settings.cloudflare_configured?'green':'muted'}>{settings.cloudflare_configured?'Настроен':'Не настроен'}</Badge></div><Field label="API Token" help="Нужны права Zone:Read и DNS:Edit для нужных зон. Пустое поле сохраняет текущий токен."><input type="password" autoComplete="new-password" value={cfToken} onChange={e=>setCfToken(e.target.value)} placeholder={settings.cloudflare_configured?'Токен сохранён · введите новый для замены':'Введите Cloudflare API Token'} disabled={!!busy}/></Field><p className="settings-token-help"><a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer" title="Откроется в новой вкладке">Создать API-токен в Cloudflare</a></p><button type="button" className="button secondary" onClick={()=>void test('cloudflare')} disabled={!!busy||!settings.cloudflare_configured}>{busy==='cloudflare'?<Spinner label="Проверка…"/>:<><Zap size={15}/>Проверить подключение</>}</button>{testResult?.service==='cloudflare'&&<div className={testResult.ok?'inline-success':'error-box'} role={testResult.ok?'status':'alert'}>{testResult.ok?<CheckCircle2 size={17}/>:<TriangleAlert size={17}/>}<span>{testResult.message}</span></div>}</div><div className="settings-section"><div className="settings-section-header"><div className="integration-icon purple"><Network size={23}/></div><div><h3>Remnawave</h3><p>Импорт узлов и управление состоянием хостов</p></div><Badge tone={settings.remnawave_configured?'green':'muted'}>{settings.remnawave_configured?'Настроен':'Не настроен'}</Badge></div><Field label="URL панели Remnawave" help="Адрес API вашей панели, например https://panel.example.com"><input type="url" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://panel.example.com" disabled={!!busy}/></Field><Field label="API Token" help="Пустое поле сохраняет текущий токен. Для управления хостами нужны права чтения и изменения хостов."><input type="password" autoComplete="new-password" value={rwToken} onChange={e=>setRwToken(e.target.value)} placeholder={settings.remnawave_configured?'Токен сохранён · введите новый для замены':'Введите Remnawave API Token'} disabled={!!busy}/></Field><button type="button" className="button secondary" onClick={()=>void test('remnawave')} disabled={!!busy||!settings.remnawave_configured}>{busy==='remnawave'?<Spinner label="Проверка…"/>:<><Zap size={15}/>Проверить подключение</>}</button>{testResult?.service==='remnawave'&&<div className={testResult.ok?'inline-success':'error-box'} role={testResult.ok?'status':'alert'}>{testResult.ok?<CheckCircle2 size={17}/>:<TriangleAlert size={17}/>}<span>{testResult.message}</span></div>}</div><div className="settings-save"><span>Сначала сохраните новые токены, затем проверьте подключение.</span><button className="button primary" disabled={!!busy}>{busy==='save'?<Spinner label="Сохранение…"/>:<><Check size={17}/>Сохранить</>}</button></div></div></form><NotificationsSettings onAuthError={onAuthError}/></div><div className="settings-aside"><section className="panel agents-settings-link"><h2>Агенты</h2><p>Состояния агентов и независимые маршруты проверок доступны в разделе «Агенты».</p><a className="button secondary" href="#agents">Открыть агентов<ArrowRight size={17}/></a></section><div className="panel security-card"><ShieldCheck size={23}/><h3>Защита по умолчанию</h3><ul><li>Последняя A-запись сохраняется</li><li>Исключённые узлы проверяются</li><li>Секреты зашифрованы на сервере</li><li>Пауза останавливает изменения DNS и хостов</li></ul></div></div></div>;
+ return <div className="settings-layout"><div className="settings-form"><form onSubmit={save}><div className="panel"><PanelHeading title="Интеграции" description="Токены не отображаются после сохранения"/>{error&&<ErrorBox message={error}/>}<div className="settings-section"><div className="settings-section-header"><div className="integration-icon orange"><Cloud size={23}/></div><div><h3>Cloudflare</h3><p>Управление DNS-only A-записями</p></div><Badge tone={settings.cloudflare_configured?'green':'muted'}>{settings.cloudflare_configured?'Настроен':'Не настроен'}</Badge></div><Field label="API Token" help="Нужны права Zone:Read и DNS:Edit для нужных зон. Пустое поле сохраняет текущий токен."><input type="password" autoComplete="new-password" value={cfToken} onChange={e=>setCfToken(e.target.value)} placeholder={settings.cloudflare_configured?'Токен сохранён · введите новый для замены':'Введите Cloudflare API Token'} disabled={!!busy}/></Field><p className="settings-token-help"><a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer" title="Откроется в новой вкладке">Создать API-токен в Cloudflare</a></p><button type="button" className="button secondary" onClick={()=>void test('cloudflare')} disabled={!!busy||!settings.cloudflare_configured}>{busy==='cloudflare'?<Spinner label="Проверка…"/>:<><Zap size={15}/>Проверить подключение</>}</button>{testResult?.service==='cloudflare'&&<div className={testResult.ok?'inline-success':'error-box'} role={testResult.ok?'status':'alert'}>{testResult.ok?<CheckCircle2 size={17}/>:<TriangleAlert size={17}/>}<span>{testResult.message}</span></div>}</div><div className="settings-section"><div className="settings-section-header"><div className="integration-icon purple"><Network size={23}/></div><div><h3>Remnawave</h3><p>Импорт узлов и управление состоянием хостов</p></div><Badge tone={settings.remnawave_configured?'green':'muted'}>{settings.remnawave_configured?'Настроен':'Не настроен'}</Badge></div><Field label="URL панели Remnawave" help="Адрес API вашей панели, например https://panel.example.com"><input type="url" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://panel.example.com" disabled={!!busy}/></Field><Field label="API Token" help="Пустое поле сохраняет текущий токен. Для управления хостами нужны права чтения и изменения хостов."><input type="password" autoComplete="new-password" value={rwToken} onChange={e=>setRwToken(e.target.value)} placeholder={settings.remnawave_configured?'Токен сохранён · введите новый для замены':'Введите Remnawave API Token'} disabled={!!busy}/></Field><button type="button" className="button secondary" onClick={()=>void test('remnawave')} disabled={!!busy||!settings.remnawave_configured}>{busy==='remnawave'?<Spinner label="Проверка…"/>:<><Zap size={15}/>Проверить подключение</>}</button>{testResult?.service==='remnawave'&&<div className={testResult.ok?'inline-success':'error-box'} role={testResult.ok?'status':'alert'}>{testResult.ok?<CheckCircle2 size={17}/>:<TriangleAlert size={17}/>}<span>{testResult.message}</span></div>}</div><div className="settings-save"><span>Сначала сохраните новые токены, затем проверьте подключение.</span><button className="button primary" disabled={!!busy}>{busy==='save'?<Spinner label="Сохранение…"/>:<><Check size={17}/>Сохранить</>}</button></div></div></form><ProviderSettings revision={providerRevision} focused={focusProviders} onAuthError={onAuthError}/><NotificationsSettings onAuthError={onAuthError}/></div><div className="settings-aside"><section className="panel agents-settings-link"><h2>Агенты</h2><p>Состояния агентов и независимые маршруты проверок доступны в разделе «Агенты».</p><a className="button secondary" href="#agents">Открыть агентов<ArrowRight size={17}/></a></section><div className="panel security-card"><ShieldCheck size={23}/><h3>Защита по умолчанию</h3><ul><li>Последняя A-запись сохраняется</li><li>Исключённые узлы проверяются</li><li>Секреты зашифрованы на сервере</li><li>Пауза останавливает изменения DNS и хостов</li></ul></div></div></div>;
 }

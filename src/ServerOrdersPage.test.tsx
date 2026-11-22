@@ -32,7 +32,7 @@ function mockOrders(handle:(path:string,options?:RequestInit)=>unknown){
   if(path==='/auth/me')return {username:'admin'} as T;
   if(path==='/auth/login')return {username:'admin'} as T;
   if(path==='/settings'||path==='/overview')return {} as T;
-  if(path.startsWith('/server-orders'))return await handle(path,options) as T;
+  if(path.startsWith('/server-orders')||path==='/settings/providers')return await handle(path,options) as T;
   return [] as T;
  });
 }
@@ -120,7 +120,7 @@ describe('server ordering',()=>{
   expect(host.querySelector('nav [aria-current="page"]')?.textContent).toBe('Серверы');
   const hostings=host.querySelector('section[aria-labelledby="server-hostings-title"]');
   expect(hostings?.querySelector('button')).toBe(button('Заказать сервер'));
-  expect(hostings?.querySelector('a')?.getAttribute('href')).toBe('https://virtua.cloud/');
+  expect(hostings?.querySelector('a[href="https://virtua.cloud/"]')).not.toBeNull();
   await click('Заказать сервер');
   await choose('nl-ams1');
   expect(wizardSelect()?.textContent).toContain('Premium');
@@ -206,6 +206,7 @@ describe('server ordering',()=>{
    ['kind=profile&pool_id=pool-1&group=nodes']:[{id:'profile-1',label:'VLESS'}],
   };
   mockOrders((path,options)=>{
+   if(path==='/settings/providers')return {upcloud_configured:true,virtua_configured:configured,ansible_ready:true,order_ansible_ready:true};
    if(path==='/server-orders/settings/virtua'){
     expect(options).toEqual(json('PUT',{virtua_token:'test-key'}));
     configured=true;
@@ -220,12 +221,15 @@ describe('server ordering',()=>{
    return {orders:requests.length>1?[{...job,zone:'par01fr',provider:'virtua'}]:[],pools:[pool],stages,virtua_configured:configured};
   });
   await act(async()=>root.render(<App/>));
-  const settings=host.querySelector<HTMLDetailsElement>('.virtua-settings')!;
-  expect(settings.textContent).toContain('Подключить Virtua.Cloud');
-  settings.open=true;
+  expect(host.querySelector('a[href="#settings/providers"]')).not.toBeNull();
+  await act(async()=>{window.location.hash='#settings/providers';window.dispatchEvent(new HashChangeEvent('hashchange'));});
+  const settings=host.querySelectorAll<HTMLFormElement>('.provider-settings form')[1];
+  expect(settings.textContent).toContain('Требуется токен');
   await type(settings.querySelector('input')!,'test-key');
-  await click('Сохранить токен');
+  await click('Сохранить токен Virtua.Cloud');
   expect(settings.querySelector('input')?.value).toBe('');
+  expect(settings.textContent).toContain('Токен сохранён');
+  await act(async()=>{window.location.hash='#servers';window.dispatchEvent(new HashChangeEvent('hashchange'));});
   await click('Заказать сервер Virtua.Cloud');
   await choose('par01fr');
   expect(wizardSelect('Тариф')).toBeTruthy();
