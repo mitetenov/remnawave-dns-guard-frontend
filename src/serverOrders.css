@@ -38,6 +38,10 @@
 .order-pool-template>.button{margin-top:23px;min-height:42px}
 .order-pool-feedback{grid-column:1/-1}
 .order-pool-feedback .error-box,.order-pool-feedback .inline-success{margin:0}
+.order-auto-hosts{padding:16px 20px;color:var(--muted);font-size:12px}
+.order-auto-hosts summary{cursor:pointer;width:fit-content;color:#8dc8bf}
+.order-auto-hosts form{margin:16px 0;max-width:520px}
+.order-auto-selector{max-width:520px;padding:12px;border:1px solid var(--border);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere}
 .server-orders-empty{padding:20px;color:var(--muted);font-size:12px}
 .order-wizard-body{padding:20px}
 .order-steps{display:flex;flex-wrap:wrap;gap:7px;margin:0 0 22px;padding:0;list-style:none}

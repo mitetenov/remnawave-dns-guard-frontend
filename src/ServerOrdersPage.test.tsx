@@ -27,11 +27,12 @@ afterEach(async()=>{
  sessionStorage.clear();vi.useRealTimers();vi.unstubAllGlobals();
 });
 
-function mockOrders(handle:(path:string,options?:RequestInit)=>unknown){
+function mockOrders(handle:(path:string,options?:RequestInit)=>unknown,remnawaveHosts:unknown[]=[]){
  vi.mocked(api).mockImplementation(async <T,>(path:string,options?:RequestInit)=>{
   if(path==='/auth/me')return {username:'admin'} as T;
   if(path==='/auth/login')return {username:'admin'} as T;
   if(path==='/settings'||path==='/overview')return {} as T;
+  if(path==='/remnawave/hosts')return remnawaveHosts as T;
   if(path.startsWith('/server-orders')||path==='/settings/providers')return await handle(path,options) as T;
   return [] as T;
  });
@@ -294,6 +295,31 @@ describe('server ordering',()=>{
   expect(host.querySelector('.order-wizard [role="alert"]')?.textContent).toContain('REPLACEMENT_ANSIBLE_XHTTP_PATH');
   expect(host.querySelector('.order-confirm')).toBeNull();
   expect(button('Продолжить').disabled).toBe(true);
+ });
+
+ it('prepares the Finland slots from a host matching the selected pool',async()=>{
+  let slots:unknown[]=[];
+  const hostname=`dns-guard-auto-fi-01.${pool.hostname}`;
+  mockOrders((_path,options)=>{
+   if(options?.method==='PUT'){
+    slots=[{country:'FI',pool_id:pool.id,source_uuid:'source',slot:1,hostname,occupied:0}];
+    return {ok:true};
+   }
+   return {orders:[],pools:[pool],stages,auto_hosts:slots};
+  },[{uuid:'source',address:pool.hostname,remark:'Хост пула',port:443},{uuid:'other',address:'other.example.net',remark:'Другой хост',port:443}]);
+  await act(async()=>root.render(<App/>));
+  const details=host.querySelector<HTMLDetailsElement>('.order-auto-hosts')!;
+  await act(async()=>{details.open=true;details.dispatchEvent(new Event('toggle'));});
+  const [country,poolSelect,source]=details.querySelectorAll('select');
+  for(const [select,value] of [[country,'FI'],[poolSelect,pool.id],[source,'source']] as const){
+   await act(async()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});
+  }
+  expect(source.textContent).toContain('Хост пула');
+  expect(source.textContent).not.toContain('Другой хост');
+  await click('Подготовить 10 автохостов');
+  expect(api).toHaveBeenCalledWith('/server-orders/auto-hosts/FI',json('PUT',{pool_id:pool.id,source_uuid:'source'}));
+  expect(details.textContent).toContain(hostname);
+  expect(details.textContent).toContain('remarkRegex');
  });
 
  it('explains an empty pool list and refreshes the wizard from both buttons',async()=>{
