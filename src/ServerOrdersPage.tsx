@@ -8,6 +8,7 @@ import './serverOrders.css';
 
 interface ServerOrder {
  id:string;
+ retry_operation_id?:string|null;
  domain:string;
  stage:string;
  error:string|null;
@@ -194,6 +195,7 @@ function ServerOrderRow({order,stages,reload,onDelete,onAuthError}:{order:Server
  const tone=order.error||order.stage==='rejected'?'red':partiallyDeleted||order.stage==='deleting'?'amber':order.stage==='complete'?'green':['cancelled','deleted'].includes(order.stage)?'muted':'blue';
  const provider=order.provider??'upcloud';
  const providerName=orderProviderNames[provider];
+ const operationID=order.retry_operation_id??order.id;
  const groupName=order.group_name==='nodes'?'Обычная нода':order.group_name==='nodes_wl'?'Нода за CDN':order.group_name;
 
  async function actOnOrder(){
@@ -223,7 +225,7 @@ function ServerOrderRow({order,stages,reload,onDelete,onAuthError}:{order:Server
   {order.error&&<OrderError message={order.error}/>}
   {showConfirmation&&<div className="server-order-confirmation">
    <p>{confirmation==='cancel'?'Отменить заказ на создание сервера?':`Проверьте список серверов и журнал действий ${providerName}. Убедитесь, что сервер по этому заказу отсутствует и запрос на его создание больше не выполняется.`}</p>
-   {confirmation==='retry-create'&&(provider==='virtua'?<p>Имя сервера в Virtua.Cloud <code>dns-guard-{order.id}</code></p>:<p>Метка в UpCloud <code>dns-guard-order={order.id}</code></p>)}
+   {confirmation==='retry-create'&&(provider==='virtua'?<p>Имя сервера в Virtua.Cloud <code>dns-guard-{operationID}</code></p>:<p>Метка в UpCloud <code>dns-guard-order={operationID}</code></p>)}
    <div className="server-order-actions">
     <button type="button" className="button secondary" disabled={busy} onClick={()=>setConfirmation(null)}>Назад</button>
     <button type="button" className="button danger" disabled={busy} onClick={()=>void actOnOrder()}>{busy&&<LoaderCircle className="spin" size={16}/>} {confirmation==='cancel'?'Да, отменить заказ':'Подтвердить отсутствие и повторить'}</button>
