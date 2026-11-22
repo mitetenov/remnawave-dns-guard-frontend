@@ -3,6 +3,7 @@ import {ArrowUpRight,Check,CheckCircle2,FileText,LoaderCircle,Server,ServerCog,T
 import {api,json} from './api';
 import {Modal} from './Modal';
 import {orderProviderNames,pendingServerOrder,ServerOrderWizard,type OrderProvider} from './ServerOrderWizard';
+import type {Host} from './types';
 import {providerSettingsHash,ReadinessBadge} from './ProviderSettings';
 import './serverOrders.css';
 
@@ -10,6 +11,7 @@ interface ServerOrder {
  id:string;
  retry_operation_id?:string|null;
  domain:string;
+ auto_hostname?:string|null;
  stage:string;
  error:string|null;
  zone:string;
@@ -27,7 +29,8 @@ interface ServerOrder {
 }
 type DeletionOptions={hosting:boolean;remnawave:boolean;dns:boolean};
 interface OrderPool {id:string;name:string;hostname:string;domain_template:string|null}
-interface OrderSnapshot {orders:ServerOrder[];pools:OrderPool[];stages:Record<string,string>;upcloud_configured?:boolean;virtua_configured?:boolean}
+interface AutoHost {country:string;pool_id:string;source_uuid:string;hostname:string;slot:number;occupied:number}
+interface OrderSnapshot {orders:ServerOrder[];pools:OrderPool[];stages:Record<string,string>;upcloud_configured?:boolean;virtua_configured?:boolean;auto_hosts?:AutoHost[]}
 type ReportError=(error:unknown)=>string;
 
 export function useServerOrders(active:boolean,onAuthError:ReportError){
@@ -94,6 +97,64 @@ function OrderPoolTemplate({pool,reload,onAuthError}:{pool:OrderPool;reload:()=>
   <button className="button secondary" disabled={busy||!valid||template===savedTemplate}>{busy?<LoaderCircle className="spin" size={16}/>:<Check size={16}/>}Сохранить<span className="sr-only"> шаблон для пула {pool.name}</span></button>
   {(error||result)&&<div className="order-pool-feedback">{error?<OrderError message={error}/>:<p className="inline-success" role="status"><CheckCircle2 size={16}/>{result}</p>}</div>}
  </form>;
+}
+
+const autoCountries=[{code:'DE',name:'Германия'},{code:'FI',name:'Финляндия'}];
+
+function OrderAutoHosts({slots,pools,reload,onAuthError}:{slots:AutoHost[];pools:OrderPool[];reload:()=>Promise<void>;onAuthError:ReportError}){
+ const [country,setCountry]=useState('DE'),[poolID,setPoolID]=useState(''),[sourceID,setSourceID]=useState('');
+ const [hosts,setHosts]=useState<Host[]|null>(null),[loading,setLoading]=useState(false),[busy,setBusy]=useState(false);
+ const [error,setError]=useState(''),[message,setMessage]=useState('');
+ const existing=slots.filter(slot=>slot.country===country);
+ const pool=pools.find(item=>item.id===(existing[0]?.pool_id??poolID));
+ const sourceHosts=hosts?.filter(host=>host.address.toLowerCase().replace(/\.$/,'')===pool?.hostname)??[];
+
+ async function loadHosts(){
+  if(loading||hosts)return;
+  setLoading(true);setError('');
+  try{setHosts(await api<Host[]>('/remnawave/hosts'));}
+  catch(error){setError(onAuthError(error));}
+  finally{setLoading(false);}
+ }
+
+ async function submit(event:FormEvent){
+  event.preventDefault();
+  if(!pool||!sourceID||busy||existing.length)return;
+  setBusy(true);setError('');setMessage('');
+  try{
+   await api(`/server-orders/auto-hosts/${country}`,json('PUT',{pool_id:pool.id,source_uuid:sourceID}));
+   await reload();
+   setMessage('Автохосты подготовлены. Подключите их к шаблону «авто» в Remnawave.');
+  }catch(error){setError(onAuthError(error));}
+  finally{setBusy(false);}
+ }
+
+ return <section className="panel" aria-labelledby="order-auto-hosts-title">
+  <div className="panel-heading"><div><h2 id="order-auto-hosts-title">Автохосты</h2><p>По 10 постоянных адресов для Германии и Финляндии.</p></div></div>
+  <details className="order-auto-hosts" onToggle={event=>{if(event.currentTarget.open&&!existing.length)void loadHosts();}}>
+   <summary>Настроить автохосты</summary>
+   <form onSubmit={submit}>
+    <label className="field"><span>Страна автохостов</span><select value={country} disabled={busy} onChange={event=>{setCountry(event.target.value);setPoolID('');setSourceID('');setError('');setMessage('');if(!slots.some(slot=>slot.country===event.target.value))void loadHosts();}}>
+     {autoCountries.map(item=><option key={item.code} value={item.code}>{item.name}</option>)}
+    </select></label>
+    {existing.length>0?<p className="field-help">{pool?.name} · занято {existing.filter(slot=>slot.occupied).length} из {existing.length} · <code>{existing[0].hostname}</code></p>:<>
+     <label className="field"><span>DNS-пул автохостов</span><select required value={poolID} disabled={busy} onChange={event=>{setPoolID(event.target.value);setSourceID('');setError('');if(!hosts)void loadHosts();}}>
+      <option value="">Выберите DNS-пул</option>{pools.filter(item=>item.domain_template).map(item=><option key={item.id} value={item.id}>{item.name} · {item.hostname}</option>)}
+     </select></label>
+     <label className="field"><span>Исходный хост Remnawave</span><select required value={sourceID} disabled={!pool||!hosts||busy} onChange={event=>{setSourceID(event.target.value);setError('');}}>
+      <option value="">{loading?'Загрузка хостов…':'Выберите хост с параметрами подключения'}</option>
+      {sourceHosts.map(host=><option key={host.uuid} value={host.uuid}>{host.remark||host.address} · {host.port}</option>)}
+     </select></label>
+     {pool&&hosts&&!sourceHosts.length&&<p className="field-help">В Remnawave нужен хост с адресом {pool.hostname}.</p>}
+     <button className="button secondary" disabled={!pool||!sourceID||busy}>{busy?<LoaderCircle className="spin" size={16}/>:<Check size={16}/>}Подготовить 10 автохостов</button>
+    </>}
+    {error&&<OrderError message={error}/>}
+    {message&&<p className="inline-success" role="status">{message}</p>}
+   </form>
+   <p className="field-help">В шаблоне XRAY_JSON «авто» добавьте в <code>remnawave.injectHosts</code> группу ниже. Добавьте префикс <code>dns-guard-auto-</code> в селекторы балансировщика и проверок доступности.</p>
+   <pre className="order-auto-selector">{JSON.stringify({selector:{type:'remarkRegex',pattern:'^dns-guard-auto-(de|fi)-(0[1-9]|10)$'},selectFrom:'HIDDEN',useHostRemarkAsTag:true},null,2)}</pre>
+  </details>
+ </section>;
 }
 
 function timeLabel(value:string){
@@ -220,6 +281,7 @@ function ServerOrderRow({order,stages,reload,onDelete,onAuthError}:{order:Server
    <div><dt>Тип узла</dt><dd>{groupName}</dd></div>
    <div><dt>Профиль Remnawave</dt><dd>{order.profile_name}</dd></div>
    {order.ip&&<div><dt>IP</dt><dd><code>{order.ip}</code></dd></div>}
+   {order.auto_hostname&&<div><dt>Автохост</dt><dd><code>{order.auto_hostname}</code></dd></div>}
    <div><dt>Дата заказа</dt><dd><time dateTime={order.created_at}>{timeLabel(order.created_at)}</time></dd></div>
   </dl>
   {order.error&&<OrderError message={order.error}/>}
@@ -287,6 +349,7 @@ export function ServerOrdersPage({snapshot,loading,error,reload,optionsRevision,
     {pools.map(pool=><OrderPoolTemplate key={pool.id} pool={pool} reload={reload} onAuthError={onAuthError}/>)}</div>:
     <p className="server-orders-empty">Сначала создайте DNS-пул в разделе «DNS-пулы».</p>}
   </section>}
+  {snapshot?.auto_hosts&&<OrderAutoHosts slots={snapshot.auto_hosts} pools={pools} reload={()=>reload(true)} onAuthError={onAuthError}/>}
   {deletingOrder&&<ServerDeleteModal key={deletingOrder.id} order={deletingOrder} onClose={()=>setDeletionID(null)} onQueued={async()=>{setDeletionID(null);await reload(true);}} onAuthError={onAuthError}/>}
  </div>;
 }
