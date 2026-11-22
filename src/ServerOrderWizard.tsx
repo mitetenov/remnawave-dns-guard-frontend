@@ -159,7 +159,7 @@ export function ServerOrderWizard({provider,onClose,onOrdered,onAuthError,option
      {steps.map(({kind,label})=><div key={kind}><dt>{label}</dt><dd>{selection[kind]?.label}</dd></div>)}
      <div><dt>Операционная система</dt><dd>Debian 13</dd></div>
     </dl>
-    <label className="checkbox-field order-confirm"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event=>setConfirmed(event.target.checked)}/><span>Подтверждаю заказ платного сервера. {providerName} будет списывать средства по указанному тарифу.</span></label>
+    <label className="checkbox-field order-confirm"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event=>setConfirmed(event.target.checked)}/><span>Подтверждаю платный заказ. {providerName} будет списывать средства по указанному тарифу. Если через 10 минут после настройки проверки подтвердят недоступность сервера, DNS Guard удалит его и один раз повторит заказ.</span></label>
     {error&&<div className="error-box" role="alert"><TriangleAlert size={17}/><span>{error}</span></div>}
     {pending&&<p className="field-help">Подтверждение от панели ещё не получено. При повторе будет отправлен тот же заказ.</p>}
    </>}
