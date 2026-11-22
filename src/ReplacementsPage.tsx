@@ -1,6 +1,7 @@
 import {useCallback,useEffect,useRef,useState,type FormEvent} from 'react';
 import {Check,CheckCircle2,ChevronRight,LoaderCircle,TriangleAlert} from 'lucide-react';
 import {api,json} from './api';
+import {providerSettingsHash,ReadinessBadge} from './ProviderSettings';
 import {orderProviderNames,type OrderProvider} from './ServerOrderWizard';
 
 interface ReplacementTarget {
@@ -114,55 +115,13 @@ function timestamp(value:string){
 
 type Save=(path:string,body:unknown)=>Promise<void>;
 
-function ReplacementSettings({snapshot,save,onAuthError}:{snapshot:ReplacementSnapshot;save:Save;onAuthError:ReportError}){
- const [token,setToken]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState(false);
-
- async function submit(event:FormEvent){
-  event.preventDefault();
-  const value=token.trim();
-  if(busy||!value)return;
-  setBusy(true);setError('');setSaved(false);
-  try{
-   await save('/replacements/settings',{upcloud_token:value});
-   setToken('');setSaved(true);
-  }catch(error){setError(onAuthError(error).replaceAll(value,'•••'));}
-  finally{setBusy(false);}
- }
-
+function ReplacementReadiness({snapshot}:{snapshot:ReplacementSnapshot}){
  return <section className="panel">
-  <div className="panel-heading"><div><h2>Готовность к замене</h2></div></div>
-  <div className="replacement-readiness">
-   <form className="settings-section" onSubmit={submit}>
-    <div className="settings-section-header">
-     <h3>UpCloud</h3>
-     <Badge tone={snapshot.upcloud_configured?'green':'amber'} label={snapshot.upcloud_configured?'Токен сохранён':'Требуется токен'}/>
-    </div>
-    <label className="field"><span>API-токен UpCloud</span><input type="password" autoComplete="new-password" value={token} onChange={event=>{setToken(event.target.value);setSaved(false);setError('');}} placeholder={snapshot.upcloud_configured?'Введите новый токен для замены':''} disabled={busy}/></label>
-    <button className="button secondary" disabled={busy||!token.trim()}>{busy?<LoaderCircle className="spin" size={16}/>:<Check size={16}/>}Сохранить токен</button>
-    {error&&<ErrorMessage message={error}/>}
-    {saved&&<div className="inline-success" role="status"><CheckCircle2 size={16}/>Токен UpCloud сохранён.</div>}
-    {snapshot.virtua_configured!==undefined&&<div className="replacement-order-readiness">
-     <div className="settings-section-header">
-      <h3>Virtua.Cloud</h3>
-      <Badge tone={snapshot.virtua_configured?'green':'amber'} label={snapshot.virtua_configured?'Токен сохранён':'Требуется токен'}/>
-     </div>
-     <a href="#servers" className="button secondary">Настроить токен в разделе «Серверы»</a>
-    </div>}
-   </form>
-   <div className="settings-section">
-    {snapshot.order_ansible_ready!==undefined&&<div className="replacement-order-readiness">
-     <div className="settings-section-header">
-      <h3>Ansible для заказов и Virtua.Cloud</h3>
-      <Badge tone={snapshot.order_ansible_ready?'green':'amber'} label={snapshot.order_ansible_ready?'Готов':'Требуется настройка'}/>
-     </div>
-     {snapshot.order_ansible_error&&<ErrorMessage message={snapshot.order_ansible_error}/>}
-    </div>}
-    <div className="settings-section-header">
-     <h3>{snapshot.order_ansible_ready===undefined?'Ansible':'Ansible для ручных привязок UpCloud'}</h3>
-     <Badge tone={snapshot.ansible_ready?'green':'amber'} label={snapshot.ansible_ready?'Готов':'Требуется настройка'}/>
-    </div>
-    {snapshot.ansible_error&&<ErrorMessage message={snapshot.ansible_error}/>}
-   </div>
+  <div className="panel-heading"><h2>Готовность к замене</h2><a className="button secondary" href={providerSettingsHash}>Настроить хостинги и Ansible</a></div>
+  <div className="replacement-readiness settings-section">
+   <div className="provider-ansible"><p>Ручные привязки UpCloud</p><ReadinessBadge ready={snapshot.upcloud_configured&&snapshot.ansible_ready}/></div>
+   {snapshot.virtua_configured!==undefined&&<div className="provider-ansible"><p>Virtua.Cloud</p><ReadinessBadge ready={snapshot.virtua_configured&&(snapshot.order_ansible_ready??snapshot.ansible_ready)}/></div>}
+   {snapshot.order_ansible_ready!==undefined&&<div className="provider-ansible"><p>Узлы из заказов UpCloud</p><ReadinessBadge ready={snapshot.upcloud_configured&&snapshot.order_ansible_ready}/></div>}
   </div>
  </section>;
 }
@@ -366,7 +325,7 @@ export function ReplacementsPage({snapshot,loading,error,reload,onAuthError}:Ret
     </div>
    </div>
    <ReplacementHistory jobs={jobs} reload={reload} onAuthError={onAuthError}/>
-   <ReplacementSettings snapshot={snapshot} save={save} onAuthError={onAuthError}/>
+   <ReplacementReadiness snapshot={snapshot}/>
    <section className="panel">
     <div className="panel-heading"><div><h2>Привязки узлов</h2><p>Укажите провайдера, UUID сервера и UUID узла Remnawave.</p></div></div>
     {targets.length?targets.map(target=>{

@@ -80,3 +80,68 @@ describe('dashboard request ordering',()=>{
   expect(container.textContent).not.toContain('Late secret data');
  });
 });
+
+describe('pool route polling',()=>{
+ it('stops target requests after leaving, including an in-flight response',async()=>{
+  const old=deferred<unknown>();
+  const targetRequest=vi.fn();
+  vi.mocked(api).mockImplementation(async <T,>(path:string,options?:RequestInit):Promise<T>=>{
+   if(path==='/auth/me')return {username:'review'} as T;
+   if(path==='/pools')return [pool] as T;
+   if(path==='/header')return {pools:1,agents_total:2,agents_healthy:1,agent_healthy:true} as T;
+   if(path==='/pools/one/targets'){
+    targetRequest(options?.signal);
+    return await old.promise as T;
+   }
+   return [] as T;
+  });
+  window.location.hash='#pools/one';
+  await render();
+  expect(targetRequest).toHaveBeenCalledTimes(1);
+  const agents=[...container.querySelectorAll('nav button')].find(button=>button.textContent?.startsWith('Агенты'));
+  await act(async()=>agents?.dispatchEvent(new MouseEvent('click',{bubbles:true})));
+  expect(targetRequest.mock.calls[0][0]?.aborted).toBe(true);
+  await backgroundRefresh();
+  await act(async()=>old.resolve([{id:'late',name:'Late target'}]));
+  expect(targetRequest).toHaveBeenCalledTimes(1);
+  expect(container.textContent).not.toContain('Late target');
+  expect(vi.mocked(api).mock.calls.some(([path])=>path==='/overview')).toBe(false);
+ });
+ it('focuses a linked target and renders one copy of its actions',async()=>{
+  vi.mocked(api).mockImplementation(async <T,>(path:string):Promise<T>=>{
+   if(path==='/auth/me')return {username:'review'} as T;
+   if(path==='/pools')return [pool] as T;
+   if(path==='/pools/one/targets')return [{id:'linked',name:'Linked target',ip:'1.1.1.1',status:'healthy',manual_enabled:true,failures:0,successes:2}] as T;
+   return {} as T;
+  });
+  window.location.hash='#pools/one/targets/linked';
+  await render();
+  expect(document.activeElement?.id).toBe('pool-target-linked');
+  expect(container.querySelectorAll('[aria-label="Редактировать узел"]')).toHaveLength(1);
+  expect(container.querySelector('a[href="#events?pool_id=one&target_id=linked"]')).not.toBeNull();
+  const back=container.querySelector<HTMLButtonElement>('.back-link');
+  await act(async()=>back?.click());
+  expect(window.location.hash).toBe('#pools');
+  expect(container.querySelector('#pool-target-linked')).toBeNull();
+ });
+ it('moves focus into the mobile menu, traps it and restores it on Escape',async()=>{
+  vi.stubGlobal('matchMedia',()=>({matches:true,addEventListener:vi.fn(),removeEventListener:vi.fn()}));
+  mockRequests(async()=>[pool]);
+  await render();
+  const open=container.querySelector<HTMLButtonElement>('button[aria-label="Открыть меню"]')!;
+  const menu=container.querySelector('aside')!;
+  const main=container.querySelector('main')!;
+  expect(menu.hasAttribute('inert')).toBe(true);
+  await act(async()=>open.click());
+  const close=container.querySelector<HTMLButtonElement>('button[aria-label="Закрыть меню"]')!;
+  expect(main.hasAttribute('inert')).toBe(true);
+  expect(menu.getAttribute('aria-modal')).toBe('true');
+  expect(document.activeElement).toBe(close);
+  await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',shiftKey:true,cancelable:true})));
+  expect(document.activeElement).toBe(menu.querySelector('.user-button'));
+  await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'})));
+  expect(main.hasAttribute('inert')).toBe(false);
+  expect(menu.hasAttribute('inert')).toBe(true);
+  expect(document.activeElement).toBe(open);
+ });
+});

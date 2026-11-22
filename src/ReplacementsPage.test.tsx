@@ -34,7 +34,7 @@ function mockRequests(replacements:(path:string,options?:RequestInit)=>unknown){
  vi.mocked(api).mockImplementation(async <T,>(path:string,options?:RequestInit)=>{
   if(path==='/auth/me')return {username:'review'} as T;
   if(path==='/settings'||path==='/overview')return {} as T;
-  if(path.startsWith('/replacements')||path.startsWith('/server-orders/options?'))return await replacements(path,options) as T;
+  if(path.startsWith('/replacements')||path.startsWith('/server-orders/options?')||path==='/settings/providers')return await replacements(path,options) as T;
   return [] as T;
  });
 }
@@ -111,16 +111,21 @@ describe('automatic replacement settings',()=>{
   expect(container.querySelector('h1')?.textContent).toBe('Автозамена');
   expect(container.querySelector('nav [aria-current="page"]')?.textContent).toBe('Автозамена');
   expect(container.textContent).toContain('5 минут подтверждённой непрерывной блокировки');
+  expect(container.textContent).toContain('Требуется настройка');
+  expect(container.querySelector('a[href="#settings/providers"]')).not.toBeNull();
+  expect(container.querySelector('input[type=password]')).toBeNull();
+  await act(async()=>{window.location.hash='#settings/providers';window.dispatchEvent(new HashChangeEvent('hashchange'));});
   expect(container.textContent).toContain('Не найден плейбук Ansible');
   expect(container.textContent).toContain('Токен сохранён');
-  const password=input('input[type="password"]');
+  const password=input('.provider-settings input[type="password"]');
   expect(password.value).toBe('');
-  expect(button('Сохранить токен').disabled).toBe(true);
+  expect(button('Сохранить токен UpCloud').disabled).toBe(true);
 
   await type(password,' secret-only-input ');
-  await act(async()=>button('Сохранить токен').click());
+  await act(async()=>button('Сохранить токен UpCloud').click());
   expect(api).toHaveBeenCalledWith('/replacements/settings',json('PUT',{upcloud_token:'secret-only-input'}));
-  expect(vi.mocked(api).mock.calls.filter(([path])=>path==='/replacements')).toHaveLength(2);
+  expect(vi.mocked(api).mock.calls.filter(([path])=>path==='/replacements')).toHaveLength(1);
+  expect(vi.mocked(api).mock.calls.filter(([path])=>path==='/settings/providers')).toHaveLength(2);
   expect(password.value).toBe('');
   expect(container.textContent).toContain('Токен UpCloud сохранён.');
   expect(container.innerHTML).not.toContain('secret-only-input');

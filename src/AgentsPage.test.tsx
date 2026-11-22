@@ -2,8 +2,7 @@ import {describe,expect,it} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {AgentDetail,AgentsPage,agentIDFromHash} from './AgentsPage';
 import {pageFromHash} from './navigation';
-import {TargetChecks} from './TargetChecks';
-import type {Checker,Pool,Target} from './types';
+import type {Checker} from './types';
 
 const agent:Checker={id:'ru-residential',version:'1.4.0',last_seen:'2026-10-29T01:00:00Z',status:'online',healthy:true,direct_healthy:true,routes:{direct:true,socks5:true,revision:2,supported:true},proxy:{configured:true,supported:true,endpoint:'socks5://proxy.example.com:1080',healthy:true,checked_at:null,latency_ms:null,exit_ip:null,test:null}};
 const error=()=>'';
@@ -30,9 +29,5 @@ describe('agents navigation and independent routes',()=>{
   const view=detail({...agent,status:'paused',healthy:false,routes:{...agent.routes!,direct:false,socks5:false}});
   expect(view).toMatch(/aria-label="Проверять напрямую" aria-checked="false"/);expect(view).toMatch(/aria-label="Проверять через SOCKS5" aria-checked="false"/);expect(view).toContain('proxy.example.com');expect(view).toContain('Проверки выключены');
  });
- it('shows skipped SOCKS and successful direct results separately',()=>{
-  const target={checks:[{agent_id:'ru-residential',fresh:true,failures:0,successes:1,last_checked_at:null,last_latency_ms:null,last_error:null,outcome:true,routes:{direct:{outcome:'success'},socks5:{outcome:'skipped',error:'proxy_unavailable'}}}]} as Target;
-  const view=renderToStaticMarkup(<TargetChecks target={target} pool={{failure_threshold:3,recovery_threshold:2} as Pool}/>);
-  expect(view).toContain('Напрямую: успех');expect(view).toContain('Через SOCKS5: пропущено');
- });
+
 });

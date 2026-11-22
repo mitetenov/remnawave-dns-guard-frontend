@@ -3,6 +3,7 @@ import {ArrowUpRight,Check,CheckCircle2,FileText,LoaderCircle,Server,ServerCog,T
 import {api,json} from './api';
 import {Modal} from './Modal';
 import {orderProviderNames,pendingServerOrder,ServerOrderWizard,type OrderProvider} from './ServerOrderWizard';
+import {providerSettingsHash,ReadinessBadge} from './ProviderSettings';
 import './serverOrders.css';
 
 interface ServerOrder {
@@ -25,7 +26,7 @@ interface ServerOrder {
 }
 type DeletionOptions={hosting:boolean;remnawave:boolean;dns:boolean};
 interface OrderPool {id:string;name:string;hostname:string;domain_template:string|null}
-interface OrderSnapshot {orders:ServerOrder[];pools:OrderPool[];stages:Record<string,string>;virtua_configured?:boolean}
+interface OrderSnapshot {orders:ServerOrder[];pools:OrderPool[];stages:Record<string,string>;upcloud_configured?:boolean;virtua_configured?:boolean}
 type ReportError=(error:unknown)=>string;
 
 export function useServerOrders(active:boolean,onAuthError:ReportError){
@@ -239,33 +240,6 @@ function ServerOrderRow({order,stages,reload,onDelete,onAuthError}:{order:Server
  </li>;
 }
 
-function VirtuaTokenForm({configured,onSaved,onAuthError}:{configured:boolean;onSaved:()=>Promise<void>;onAuthError:ReportError}){
- const [token,setToken]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState(false);
-
- async function submit(event:FormEvent){
-  event.preventDefault();
-  const value=token.trim();
-  if(busy||!value)return;
-  setBusy(true);setError('');setSaved(false);
-  try{
-   await api('/server-orders/settings/virtua',json('PUT',{virtua_token:value}));
-   setToken('');setSaved(true);
-   await onSaved();
-  }catch(error){setError(onAuthError(error).replaceAll(value,'•••'));}
-  finally{setBusy(false);}
- }
-
- return <details className="virtua-settings">
-  <summary>{configured?'Заменить API-токен Virtua.Cloud':'Подключить Virtua.Cloud'}</summary>
-  <form onSubmit={submit}>
-   <label className="field"><span>API-токен Virtua.Cloud</span><input type="password" autoComplete="new-password" value={token} onChange={event=>{setToken(event.target.value);setError('');setSaved(false);}} disabled={busy}/></label>
-   <button className="button secondary" disabled={busy||!token.trim()}>{busy?<LoaderCircle className="spin" size={16}/>:<Check size={16}/>}Сохранить токен</button>
-   {error&&<OrderError message={error}/>}
-   {saved&&<p className="inline-success" role="status"><CheckCircle2 size={16}/>Токен Virtua.Cloud сохранён.</p>}
-  </form>
- </details>;
-}
-
 export function ServerOrdersPage({snapshot,loading,error,reload,optionsRevision,refreshOptions,onAuthError}:ReturnType<typeof useServerOrders>&{onAuthError:ReportError}){
  const pending=pendingServerOrder();
  const pendingProvider=pending?(pending.provider??'upcloud'):null;
@@ -281,25 +255,24 @@ export function ServerOrdersPage({snapshot,loading,error,reload,optionsRevision,
   {error&&<OrderError message={error}/>}
   {ordered&&<p className="notice success" role="status"><CheckCircle2 size={18}/>Заказ принят. Статус появится в истории заказов.</p>}
   {ordering?<ServerOrderWizard provider={ordering} onClose={()=>setOrdering(null)} onOrdered={()=>{setOrdering(null);setOrdered(true);void reload(true);}} onAuthError={onAuthError} optionsRevision={optionsRevision} refreshOptions={refreshOptions}/>:<section className="panel" aria-labelledby="server-hostings-title">
-   <div className="panel-heading"><h2 id="server-hostings-title">Доступные хостинги</h2></div>
+   <div className="panel-heading"><h2 id="server-hostings-title">Доступные хостинги</h2><a className="button secondary" href={providerSettingsHash}>Настроить хостинги и Ansible</a></div>
    <ul className="server-hostings-list">
     <li>
-     <div><h3>UpCloud</h3><p>Заказ через DNS Guard</p></div>
+     <div><h3>UpCloud</h3>{snapshot?.upcloud_configured!==undefined&&<ReadinessBadge ready={snapshot.upcloud_configured} positive="Токен сохранён" negative="Требуется токен"/>}</div>
      <button className="button primary" disabled={pendingProvider==='virtua'} onClick={()=>order('upcloud')}><ServerCog size={17}/>{pendingProvider==='upcloud'?'Проверить отправку заказа':'Заказать сервер'}</button>
     </li>
     <li>
-     <div><h3>Virtua.Cloud</h3><p>Почасовой заказ через DNS Guard</p></div>
+     <div><h3>Virtua.Cloud</h3>{snapshot&&<ReadinessBadge ready={virtuaConfigured} positive="Токен сохранён" negative="Требуется токен"/>}</div>
      <div className="virtua-actions">
       <a className="button secondary" href="https://virtua.cloud/" target="_blank" rel="noopener noreferrer">Открыть Virtua.Cloud<ArrowUpRight size={16} aria-hidden="true"/></a>
       {(virtuaConfigured||pendingProvider==='virtua')&&<button className="button primary" disabled={pendingProvider==='upcloud'} onClick={()=>order('virtua')}><ServerCog size={17}/>{pendingProvider==='virtua'?'Проверить отправку заказа Virtua.Cloud':'Заказать сервер Virtua.Cloud'}</button>}
      </div>
-     {snapshot&&<VirtuaTokenForm configured={virtuaConfigured} onSaved={()=>reload(true)} onAuthError={onAuthError}/>}
     </li>
    </ul>
   </section>}
   <section className="panel" aria-labelledby="server-orders-title">
    <div className="panel-heading">
-    <div><h2 id="server-orders-title">Заказы серверов</h2><p><a className="order-settings-link" href="#replacements">Подключение UpCloud и Ansible</a></p></div>
+    <h2 id="server-orders-title">Заказы серверов</h2>
    </div>
    {!snapshot?loading&&<div className="panel-loading" role="status"><span className="loading-label"><LoaderCircle className="spin" size={17}/>Загрузка заказов…</span></div>:orders.length?
     <ul className="server-orders-list">{orders.map(order=><ServerOrderRow key={order.id} order={order} stages={snapshot.stages} reload={reload} onDelete={()=>setDeletionID(order.id)} onAuthError={onAuthError}/>)}</ul>:

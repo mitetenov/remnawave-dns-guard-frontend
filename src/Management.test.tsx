@@ -24,9 +24,9 @@ describe('pool deletion and target editing controls',()=>{
   const view=renderToStaticMarkup(<TargetCards pool={pool} targets={[{...target,manual_enabled}]} statusNames={statusNames} busy={new Set()} onAction={noop}/>);
   expect(view).toContain('Редактировать');
  });
- it('blocks mobile changes while an IP replacement is pending',()=>{
+ it('blocks changes while an IP replacement is pending',()=>{
   const view=renderToStaticMarkup(<TargetCards pool={pool} targets={[{...target,dns_pending_action:'replace_ip'}]} statusNames={statusNames} busy={new Set()} onAction={noop}/>);
-  const buttons=view.match(/<footer>([\s\S]*?)<\/footer>/)![1].match(/<button\b[^>]*>/g);
+  const buttons=view.match(/<div class="target-row-actions">([\s\S]*?)<\/div>/)![1].match(/<button\b[^>]*>/g);
   expect(buttons).toHaveLength(3);
   expect(buttons!.every(button=>button.includes('disabled'))).toBe(true);
  });

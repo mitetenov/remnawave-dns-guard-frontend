@@ -1,0 +1,7 @@
+.events-target-filter{display:flex;align-items:center;gap:7px;min-width:0}
+.events-target-filter input{font-size:10px;min-height:37px;min-width:100px;width:135px}
+.events-target-filter .button{margin-left:0;min-height:37px}
+.events-pagination{display:flex;justify-content:center;padding:15px 20px;border-top:1px solid var(--border)}
+.events-history-note{margin:0;padding:10px 20px;color:var(--muted);font-size:11px;border-bottom:1px solid var(--border)}
+.event-meta a{color:var(--blue);text-decoration:underline;text-underline-offset:2px}
+.event-meta a:hover{color:var(--teal)}
