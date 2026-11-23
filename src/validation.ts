@@ -30,6 +30,7 @@ const fieldLabels:Readonly<Record<string,string>>={
  upcloud_token:'API-токен UpCloud',
  provider:'Провайдер',
  server_uuid:'UUID сервера',
+ plugin_uuid:'Плагин ноды Remnawave',
  remnawave_uuid:'UUID узла Remnawave',
  virtua_zone:'Локация нового сервера',
  virtua_quote:'Тариф нового сервера',

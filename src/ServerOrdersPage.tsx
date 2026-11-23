@@ -23,6 +23,7 @@ interface ServerOrder {
  pool_hostname:string;
  group_name:string;
  profile_name:string;
+ plugin_name?:string;
  can_cancel?:boolean;
  can_retry_create?:boolean;
  deleted_resources?:DeletionOptions;
@@ -280,6 +281,7 @@ function ServerOrderRow({order,stages,reload,onDelete,onAuthError}:{order:Server
    <div><dt>Тариф</dt><dd>{order.plan}</dd></div>
    <div><dt>Тип узла</dt><dd>{groupName}</dd></div>
    <div><dt>Профиль Remnawave</dt><dd>{order.profile_name}</dd></div>
+   {order.plugin_name&&<div><dt>Плагин ноды Remnawave</dt><dd>{order.plugin_name}</dd></div>}
    {order.ip&&<div><dt>IP</dt><dd><code>{order.ip}</code></dd></div>}
    {order.auto_hostname&&<div><dt>Автохост</dt><dd><code>{order.auto_hostname}</code></dd></div>}
    <div><dt>Дата заказа</dt><dd><time dateTime={order.created_at}>{timeLabel(order.created_at)}</time></dd></div>

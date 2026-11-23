@@ -12,6 +12,7 @@ const stages={provision:'Создание сервера',complete:'Готов',
 const job={id:'job-1',domain:'fi-12.vpn.example.net',stage:'provision',zone:'fi-hel1',plan:'1xCPU-1GB',pool_hostname:pool.hostname,group_name:'CDN',profile_name:'VLESS',created_at:'2026-11-19T12:00:00Z',ip:null,error:null};
 const price='≈ 4.00 EUR/мес. · STARTER-1xCPU-1GB · 1 vCPU · 1024 МиБ RAM · 10 ГиБ standard · 0.00595238 EUR/ч';
 const premiumPrice='≈ 5.00 EUR/мес. · PREMIUM-1xCPU-1GB · 1 vCPU · 1024 МиБ RAM · 25 ГиБ maxiops · 0.00744048 EUR/ч';
+const plugin={id:'123e4567-e89b-42d3-a456-426614174008',label:'Node filters'};
 let host:HTMLDivElement,root:Root;
 
 beforeEach(()=>{
@@ -103,6 +104,7 @@ describe('server ordering',()=>{
    ],
    ['kind=pool']:[{id:pool.id,label:pool.name},{id:'pool-2',label:'Резервный'}],
    ['kind=group']:[{id:'nodes_wl',label:'CDN'}],
+   ['kind=plugin']:[plugin],
    ['kind=profile&pool_id=pool-1&group=nodes_wl']:[{id:'profile-1',label:'VLESS'}],
    ['kind=profile&pool_id=pool-2&group=nodes_wl']:[{id:'profile-1',label:'VLESS'},{id:'profile-2',label:'Hysteria'}],
   };
@@ -165,6 +167,8 @@ describe('server ordering',()=>{
   expect(review?.textContent).toContain(price);
   expect(review?.textContent).toContain('Debian 13');
   expect(review?.textContent).toContain('UpCloud будет списывать средства');
+  expect(wizardSelect()?.selectedOptions[0].textContent).toBe('Без плагина');
+  await changeSelect(plugin.id);
   expect(post).toHaveLength(0);
   expect(button('Подтвердить платный заказ').disabled).toBe(true);
   await act(async()=>review?.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click());
@@ -174,6 +178,8 @@ describe('server ordering',()=>{
   expect(button('Назад').disabled).toBe(true);
   await click('Закрыть заказ');
   await click('Проверить отправку заказа');
+  expect(wizardSelect()?.value).toBe(plugin.id);
+  expect(wizardSelect()?.disabled).toBe(true);
   expect(button('Повторить запрос заказа').disabled).toBe(true);
   await act(async()=>host.querySelector<HTMLInputElement>('.order-wizard input[type="checkbox"]')?.click());
   await click('Повторить запрос заказа');
@@ -188,7 +194,7 @@ describe('server ordering',()=>{
   await act(async()=>host.querySelector<HTMLInputElement>('.order-wizard input[type="checkbox"]')?.click());
   await click('Повторить запрос заказа');
   expect(post).toHaveLength(3);
-  expect(post[0]).toEqual({request_id:expect.stringMatching(/^[0-9a-f-]{36}$/),zone:'fi-hel1',plan:'hel-opaque-price-quote',pool_id:'pool-2',group:'nodes_wl',profile_id:'profile-2'});
+  expect(post[0]).toEqual({request_id:expect.stringMatching(/^[0-9a-f-]{36}$/),zone:'fi-hel1',plan:'hel-opaque-price-quote',pool_id:'pool-2',group:'nodes_wl',profile_id:'profile-2',plugin_uuid:plugin.id});
   expect(post[1]).toEqual(post[0]);
   expect(post[2]).toEqual(post[0]);
   expect(host.textContent).toContain('Заказ принят.');

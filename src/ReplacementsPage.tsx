@@ -3,6 +3,7 @@ import {Check,CheckCircle2,ChevronRight,LoaderCircle,TriangleAlert} from 'lucide
 import {api,json} from './api';
 import {providerSettingsHash,ReadinessBadge} from './ProviderSettings';
 import {orderProviderNames,type OrderProvider} from './ServerOrderWizard';
+import {NodePluginSelect} from './NodePluginSelect';
 
 interface ReplacementTarget {
  id:string;
@@ -20,6 +21,7 @@ interface ReplacementTarget {
  virtua_quote?:string;
  virtua_group?:string;
  virtua_domain?:string;
+ plugin_uuid?:string|null;
  blocked_since:string|null;
 }
 
@@ -159,6 +161,7 @@ function TargetBinding({target,locked,ready,virtuaConfigured,save,onAuthError}:{
   server_uuid:target.server_uuid??'',remnawave_uuid:target.remnawave_uuid??'',enabled:target.enabled,
   virtua_zone:target.virtua_zone??'',virtua_quote:target.virtua_quote??'',
   virtua_group:target.virtua_group??'',virtua_domain:target.virtua_domain??'',
+  plugin_uuid:target.plugin_uuid??'',
  };
  const source=JSON.stringify(initial);
  const [draft,setDraft]=useState<(typeof initial&{source:string})|null>(null),[open,setOpen]=useState(false);
@@ -178,10 +181,11 @@ function TargetBinding({target,locked,ready,virtuaConfigured,save,onAuthError}:{
   remnawave_uuid:locked?initial.remnawave_uuid:values.remnawave_uuid.trim(),
   enabled:values.enabled,
   ...(virtua?virtuaSettings:{}),
+  ...(values.plugin_uuid!==initial.plugin_uuid?{plugin_uuid:values.plugin_uuid}:{}),
  };
  const valid=!!binding.server_uuid&&!!binding.remnawave_uuid&&(!virtua||Object.values(virtuaSettings).every(Boolean));
  const changed=binding.provider!==initial.provider||binding.server_uuid!==initial.server_uuid||
-  binding.remnawave_uuid!==initial.remnawave_uuid||binding.enabled!==initial.enabled||
+  binding.remnawave_uuid!==initial.remnawave_uuid||binding.enabled!==initial.enabled||values.plugin_uuid!==initial.plugin_uuid||
   virtua&&Object.entries(virtuaSettings).some(([key,value])=>initial[key as keyof typeof virtuaSettings]!==value);
 
  function change(fields:Partial<typeof initial>){
@@ -230,6 +234,7 @@ function TargetBinding({target,locked,ready,virtuaConfigured,save,onAuthError}:{
      </select></label>
      <label className="field"><span>Отдельный домен ноды</span><input required type="text" value={values.virtua_domain} disabled={busy||locked||target.order_managed} onChange={event=>change({virtua_domain:event.target.value})} placeholder="node.example.com" autoComplete="off" spellCheck={false}/></label>
     </>}
+    <NodePluginSelect value={values.plugin_uuid?{id:values.plugin_uuid,label:'Сохранённый плагин'}:null} defaultLabel="Сохранить текущий плагин" disabled={busy||locked} active={open&&!locked} onAuthError={onAuthError} onChange={plugin=>change({plugin_uuid:plugin?.id??''})}/>
    </div>
    {virtua&&<>
     {!virtuaConfigured&&<p className="field-help">Сохраните токен Virtua.Cloud в разделе «Серверы».</p>}
