@@ -11,6 +11,9 @@ interface ProviderReadiness{
  ansible_error:string;
  order_ansible_ready:boolean;
  order_ansible_error:string;
+ ansible_vault_password_configured?:boolean;
+ ansible_vault_file_configured?:boolean;
+ ansible_ssh_key_configured?:boolean;
 }
 
 type ReportError=(error:unknown)=>string;
@@ -64,6 +67,63 @@ function ProviderTokenForm({provider,configured,onSaved,onAuthError}:{provider:P
  </form>;
 }
 
+function AnsibleSettingsForm({readiness,onSaved,onAuthError}:{readiness:ProviderReadiness;onSaved:()=>void;onAuthError:ReportError}){
+ const [password,setPassword]=useState(''),[file,setFile]=useState(''),[sshKey,setSSHKey]=useState('');
+ const [busy,setBusy]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState(false);
+ const canSave=!!(password.trim()||file.trim()||sshKey.trim());
+
+ async function submit(event:FormEvent){
+  event.preventDefault();
+  const vaultFile=file.trim();
+  if(busy||!canSave)return;
+  setBusy(true);setError('');setSaved(false);
+  try{
+   await api('/settings/providers/ansible',json('PUT',{
+    vault_password:password.trim()?password:undefined,
+    vault_file:vaultFile||undefined,
+    ssh_private_key:sshKey.trim()||undefined,
+   }));
+   setPassword('');setFile('');setSSHKey('');setSaved(true);onSaved();
+  }catch(error){
+   let message=onAuthError(error);
+   if(password)message=message.replaceAll(password,'•••');
+   if(vaultFile)message=message.replaceAll(vaultFile,'•••');
+   if(sshKey.trim())message=message.replaceAll(sshKey.trim(),'•••');
+   setError(message);
+  }finally{
+   setBusy(false);
+  }
+ }
+
+ return <form onSubmit={submit}>
+  <label className="field">
+   <span>Пароль Ansible Vault</span>
+   <input type="password" autoComplete="new-password" value={password} maxLength={4096} disabled={busy}
+    onChange={event=>{setPassword(event.target.value);setSaved(false);setError('');}}
+    placeholder={readiness.ansible_vault_password_configured?'Пароль сохранён':undefined}/>
+  </label>
+  <label className="field">
+   <span>Vault-файл с токенами Grafana</span>
+   <textarea value={file} rows={3} maxLength={65536} spellCheck={false} disabled={busy}
+    onChange={event=>{setFile(event.target.value);setSaved(false);setError('');}}
+    placeholder={readiness.ansible_vault_file_configured?'Vault-файл сохранён':'Вставьте содержимое файла, начиная с $ANSIBLE_VAULT'}/>
+   <small>JSON с ключами grafana_cloud_prometheus_token и grafana_cloud_loki_token, зашифрованный командой ansible-vault encrypt. Пустые поля сохраняют текущие значения.</small>
+  </label>
+  {readiness.ansible_ssh_key_configured===false&&<details>
+   <summary>Перенести действующий SSH-ключ</summary>
+   <label className="field">
+    <span>Приватный SSH-ключ Ansible</span>
+    <textarea value={sshKey} rows={3} maxLength={16384} spellCheck={false} disabled={busy}
+     onChange={event=>{setSSHKey(event.target.value);setSaved(false);setError('');}}/>
+    <small>При обновлении можно перенести ключ, которым DNS Guard уже подключается к нодам. Для новых установок DNS Guard создаст ключ автоматически.</small>
+   </label>
+  </details>}
+  <button className="button secondary" disabled={busy||!canSave}>{busy?<LoaderCircle className="spin" size={16}/>:<Check size={16}/>}Сохранить настройки Ansible</button>
+  {error&&<SettingsError message={error}/>}
+  {saved&&<p className="inline-success" role="status"><CheckCircle2 size={16}/>Настройки Ansible сохранены.</p>}
+ </form>;
+}
+
 export function ProviderSettings({revision,focused,onAuthError}:{revision:number;focused:boolean;onAuthError:ReportError}){
  const [readiness,setReadiness]=useState<ProviderReadiness|null>(null),[error,setError]=useState('');
  const [updates,setUpdates]=useState(0);
@@ -101,6 +161,7 @@ export function ProviderSettings({revision,focused,onAuthError}:{revision:number
    <ProviderTokenForm provider="virtua" configured={readiness.virtua_configured} onSaved={()=>saved('virtua_configured')} onAuthError={onAuthError}/>
    <div className="settings-section">
     <div className="settings-section-header"><div className="integration-icon"><Terminal size={21}/></div><h3>Ansible</h3></div>
+    <AnsibleSettingsForm readiness={readiness} onSaved={()=>setUpdates(value=>value+1)} onAuthError={onAuthError}/>
     <div className="provider-ansible"><p>Заказы серверов и автозамена Virtua.Cloud</p><ReadinessBadge ready={readiness.order_ansible_ready}/></div>
     {readiness.order_ansible_error&&<SettingsError message={readiness.order_ansible_error}/>}
     <div className="provider-ansible"><p>Автозамена для ручных привязок UpCloud</p><ReadinessBadge ready={readiness.ansible_ready}/></div>
