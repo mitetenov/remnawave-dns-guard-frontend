@@ -29,7 +29,7 @@ export function NotificationsSettings({onAuthError}:{onAuthError:(error:unknown)
  }
  const configured=!!settings?.bot_token_configured&&!!settings.chat_id;
  return <form className="panel notification-settings" onSubmit={save}>
-  <div className="panel-heading"><div><h2><Bell size={17}/> Уведомления</h2><p>Отключение и восстановление хостов</p></div></div>
+  <div className="panel-heading"><div><h2><Bell size={17}/> Уведомления</h2><p>Отключение и восстановление хостов, автозамена серверов</p></div></div>
   {error&&<div className="error-box" role="alert"><TriangleAlert size={18}/><span>{error}</span></div>}
   {!settings?<div className="settings-section">{!error&&<span className="loading-label"><LoaderCircle className="spin" size={17}/>Загрузка настроек…</span>}</div>:<>
    <div className="settings-section">
