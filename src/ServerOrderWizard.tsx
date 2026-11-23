@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState,type FormEvent} from 'react';
 import {ArrowLeft,ArrowRight,LoaderCircle,TriangleAlert,X} from 'lucide-react';
 import {api,ApiError,json} from './api';
+import {NodePluginSelect,type NodePluginChoice} from './NodePluginSelect';
 
 const steps=[
  {kind:'zone',label:'Локация',empty:'Нет доступных локаций UpCloud.'},
@@ -15,7 +16,7 @@ type Choice={id:string;label:string;family?:typeof planFamilies[number]['id']};
 type Selection=Partial<Record<Kind,Choice>>;
 export type OrderProvider='upcloud'|'virtua';
 export const orderProviderNames={upcloud:'UpCloud',virtua:'Virtua.Cloud'} satisfies Record<OrderProvider,string>;
-type PendingOrder={id:string;selection:Selection;provider?:OrderProvider};
+type PendingOrder={id:string;selection:Selection;provider?:OrderProvider;plugin?:NodePluginChoice};
 const pendingKey='dns-guard:pending-server-order';
 
 function requestID(){
@@ -52,6 +53,7 @@ export function ServerOrderWizard({provider,onClose,onOrdered,onAuthError,option
  const providerName=orderProviderNames[provider];
  const [id]=useState(()=>restored?.id??requestID());
  const [selection,setSelection]=useState<Selection>(restored?.selection??{});
+ const [plugin,setPlugin]=useState<NodePluginChoice|null>(restored?.plugin??null);
  const [planFamily,setPlanFamily]=useState('');
  const [step,setStep]=useState(restored?steps.length:0);
  const [options,setOptions]=useState<{key:string;choices:Choice[];error:string}|null>(null);
@@ -111,9 +113,9 @@ export function ServerOrderWizard({provider,onClose,onOrdered,onAuthError,option
   const {zone,plan,pool,group,profile}=selection;
   if(!zone||!plan||!pool||!group||!profile)return;
   sending.current=true;setBusy(true);setError('');
-  storePending({id,selection,provider});
+  storePending({id,selection,provider,...(plugin?{plugin}:{})});
   try{
-   const value=await api<{id:string}>('/server-orders',json('POST',{request_id:id,zone:zone.id,plan:plan.id,pool_id:pool.id,group:group.id,profile_id:profile.id,...(provider==='virtua'?{provider}:{})}));
+   const value=await api<{id:string}>('/server-orders',json('POST',{request_id:id,zone:zone.id,plan:plan.id,pool_id:pool.id,group:group.id,profile_id:profile.id,...(provider==='virtua'?{provider}:{}),...(plugin?{plugin_uuid:plugin.id}:{})}));
    if(!value?.id)throw new Error('Подтверждение заказа не получено.');
    storePending(null,id);onOrdered();
   }catch(error){
@@ -159,6 +161,7 @@ export function ServerOrderWizard({provider,onClose,onOrdered,onAuthError,option
      {steps.map(({kind,label})=><div key={kind}><dt>{label}</dt><dd>{selection[kind]?.label}</dd></div>)}
      <div><dt>Операционная система</dt><dd>Debian 13</dd></div>
     </dl>
+    <NodePluginSelect value={plugin} defaultLabel="Без плагина" disabled={busy||pending} active={!pending} onAuthError={onAuthError} onChange={choice=>{setPlugin(choice);setConfirmed(false);setError('');}}/>
     <label className="checkbox-field order-confirm"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event=>setConfirmed(event.target.checked)}/><span>Подтверждаю платный заказ. {providerName} будет списывать средства по указанному тарифу. Если через 10 минут после настройки проверки подтвердят недоступность сервера, DNS Guard удалит его и один раз повторит заказ.</span></label>
     {error&&<div className="error-box" role="alert"><TriangleAlert size={17}/><span>{error}</span></div>}
     {pending&&<p className="field-help">Подтверждение от панели ещё не получено. При повторе будет отправлен тот же заказ.</p>}

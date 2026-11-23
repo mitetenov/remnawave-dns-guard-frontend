@@ -9,6 +9,7 @@ vi.mock('./api',async importOriginal=>({...await importOriginal<typeof import('.
 
 const serverID='00d18f37-2eed-4e44-a7ac-cfed28fb678a';
 const nodeID='0cfe3994-85ba-4487-8d41-512604919aae';
+const plugin={id:'123e4567-e89b-42d3-a456-426614174008',label:'Node filters'};
 const target={id:'target',name:'Первый узел',ip:'203.0.113.2',pool_name:'Основной пул',remnawave_uuid:nodeID,provider:null as string|null,server_uuid:null as string|null,enabled:false,pool_enabled:true,manual_enabled:true,blocked_since:null};
 const configuredTarget={...target,provider:'upcloud',server_uuid:serverID,enabled:true};
 const snapshot={upcloud_configured:true,ansible_ready:false,ansible_error:'Не найден плейбук Ansible',targets:[target],jobs:[]};
@@ -63,6 +64,7 @@ async function type(field:HTMLInputElement,value:string){
 describe('automatic replacement settings',()=>{
  it('binds an existing Virtua server to a quoted plan after opt-in',async()=>{
   mockRequests((path,options)=>{
+   if(path==='/server-orders/options?kind=plugin')return {choices:[plugin]};
    if(path.startsWith('/server-orders/options?')){
     const query=new URLSearchParams(path.split('?')[1]);
     expect(query.get('provider')).toBe('virtua');
@@ -94,11 +96,17 @@ describe('automatic replacement settings',()=>{
   await choose('Тариф нового сервера','plan@quote');
   await choose('Тип ноды','nodes');
   await type(input('[placeholder="node.example.com"]'),'node.example.com');
+  const pluginField=details.querySelector<HTMLSelectElement>('select:has(option[value="'+plugin.id+'"])')!;
+  expect(pluginField.selectedOptions[0].textContent).toBe('Сохранить текущий плагин');
+  await act(async()=>{
+   pluginField.value=plugin.id;
+   pluginField.dispatchEvent(new Event('change',{bubbles:true}));
+  });
   await act(async()=>input('.replacement-binding input[type=checkbox]').click());
   await act(async()=>button('Сохранить привязку').click());
   expect(api).toHaveBeenCalledWith('/replacements/targets/target',json('PUT',{
    provider:'virtua',server_uuid:serverID,remnawave_uuid:nodeID,enabled:true,
-   virtua_zone:'par01fr',virtua_quote:'plan@quote',virtua_group:'nodes',virtua_domain:'node.example.com',
+   virtua_zone:'par01fr',virtua_quote:'plan@quote',virtua_group:'nodes',virtua_domain:'node.example.com',plugin_uuid:plugin.id,
   }));
  });
 
