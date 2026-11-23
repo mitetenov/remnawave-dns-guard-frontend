@@ -35,7 +35,7 @@ function mockRequests(replacements:(path:string,options?:RequestInit)=>unknown){
  vi.mocked(api).mockImplementation(async <T,>(path:string,options?:RequestInit)=>{
   if(path==='/auth/me')return {username:'review'} as T;
   if(path==='/settings'||path==='/overview')return {} as T;
-  if(path.startsWith('/replacements')||path.startsWith('/server-orders/options?')||path==='/settings/providers')return await replacements(path,options) as T;
+  if(path.startsWith('/replacements')||path.startsWith('/server-orders/options?')||path.startsWith('/settings/providers'))return await replacements(path,options) as T;
   return [] as T;
  });
 }
@@ -54,9 +54,9 @@ function input(selector:string){
  return match;
 }
 
-async function type(field:HTMLInputElement,value:string){
+async function type(field:HTMLInputElement|HTMLTextAreaElement,value:string){
  await act(async()=>{
-  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(field,value);
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field),'value')!.set!.call(field,value);
   field.dispatchEvent(new Event('input',{bubbles:true}));
  });
 }
@@ -148,6 +148,32 @@ describe('automatic replacement settings',()=>{
   const bindings=container.querySelectorAll('.replacement-target summary');
   expect(bindings[0]?.textContent).toContain('Включена');
   expect(bindings[1]?.textContent).toContain('Ожидает настройки');
+ });
+
+ it('saves the Vault settings and clears both write-only inputs',async()=>{
+  let configured=false;
+  mockRequests((path,options)=>{
+   if(path==='/settings/providers/ansible'&&options?.method==='PUT'){
+    configured=true;
+    return {ok:true};
+   }
+   return {...snapshot,ansible_vault_file_configured:configured,ansible_vault_password_configured:configured};
+  });
+  window.location.hash='#settings/providers';
+  await render();
+  const password=[...container.querySelectorAll('label')].find(label=>label.querySelector('span')?.textContent==='Пароль Ansible Vault')!.querySelector('input')!;
+  const file=container.querySelector<HTMLTextAreaElement>('.provider-settings textarea')!;
+  const save=button('Сохранить настройки Ansible');
+  const encrypted='$ANSIBLE_VAULT;1.1;AES256\nabcd';
+  expect(save.disabled).toBe(true);
+  await type(password,'vault-test-password');
+  await type(file,encrypted);
+  await act(async()=>save.click());
+  expect(api).toHaveBeenCalledWith('/settings/providers/ansible',json('PUT',{vault_password:'vault-test-password',vault_file:encrypted}));
+  expect(password.value).toBe('');
+  expect(file.value).toBe('');
+  expect(password.placeholder).toBe('Пароль сохранён');
+  expect(file.placeholder).toBe('Vault-файл сохранён');
  });
 
  it('requires an explicit server binding and opt-in, and displays the API error',async()=>{
