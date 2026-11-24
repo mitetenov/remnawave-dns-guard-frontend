@@ -107,7 +107,7 @@ function AnsibleSettingsForm({readiness,onSaved,onAuthError}:{readiness:Provider
    <textarea value={file} rows={3} maxLength={65536} spellCheck={false} disabled={busy}
     onChange={event=>{setFile(event.target.value);setSaved(false);setError('');}}
     placeholder={readiness.ansible_vault_file_configured?'Vault-файл сохранён':'Вставьте содержимое файла, начиная с $ANSIBLE_VAULT'}/>
-   <small>Файл YAML или JSON с ключами grafana_cloud_prometheus_token и grafana_cloud_loki_token должен быть зашифрован командой ansible-vault encrypt. Пустые поля сохраняют текущие значения.</small>
+   <small>Подойдёт файл secrets/grafana.yml с общим токеном common_alloy_grafana_token или файл с отдельными токенами grafana_cloud_prometheus_token и grafana_cloud_loki_token. Вставьте зашифрованное содержимое целиком. Пустые поля сохраняют текущие значения.</small>
   </label>
   {readiness.ansible_ssh_key_configured===false&&<details>
    <summary>Перенести действующий SSH-ключ</summary>
