@@ -23,18 +23,33 @@ function field<T extends HTMLElement>(label:string):T {
  const element=[...container.querySelectorAll('label.field')].find(item=>item.querySelector('span')?.textContent===label)?.querySelector('input,textarea,select');
  expect(element).toBeDefined();return element as T;
 }
-async function importHysteria(){
+async function importURI(uri:string){
  const saved=vi.fn().mockResolvedValue(undefined);
  await act(async()=>root.render(<ProfileForm pool={pool} onClose={()=>{}} onSaved={saved}/>));
  const input=field<HTMLTextAreaElement>('VLESS / Hysteria2 URI');
  await act(async()=>{
-  const fm=encodeURIComponent('{"quicParams":{"debug":false,"congestion":"bbr"}}');
-  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(input,`hy2://secret%3Apass@node.example.com:8443?sni=edge.example.com&obfs=salamander&obfs-password=obfs-secret&fm=${fm}`);
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(input,uri);
   input.dispatchEvent(new Event('input',{bubbles:true}));
  });
  await click('Прочитать и проверить параметры');
  return saved;
 }
+function importHysteria(){
+ const fm=encodeURIComponent('{"quicParams":{"debug":false,"congestion":"bbr"}}');
+ return importURI(`hy2://secret%3Apass@node.example.com:8443?sni=edge.example.com&obfs=salamander&obfs-password=obfs-secret&fm=${fm}`);
+}
+it('displays imported VLESS fragmentation and preserves it when saving from the fields tab',async()=>{
+ const settings={packets:'tlshello',length:'10-20',delay:'0'};
+ const fm=encodeURIComponent(JSON.stringify({tcp:[{type:'fragment',settings}]}));
+ const saved=await importURI(`vless://550e8400-e29b-41d4-a716-446655440000@node.example.com:443?type=tcp&security=reality&sni=edge.example.com&pbk=${'A'.repeat(43)}&flow=xtls-rprx-vision&fm=${fm}`);
+ expect(field<HTMLInputElement>('Длина фрагмента, байт').value).toBe('10-20');
+ expect(field<HTMLInputElement>('Задержка между фрагментами, мс').value).toBe('0');
+ await act(async()=>container.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+ expect(api).toHaveBeenCalledWith('/pools/one/profile',expect.objectContaining({method:'PUT',body:expect.any(String)}));
+ const body=JSON.parse(vi.mocked(api).mock.calls[0][1]!.body as string);
+ expect(body).toMatchObject({transport:'tcp',flow:'xtls-rprx-vision',vless_fragment:settings});
+ expect(saved).toHaveBeenCalledOnce();
+});
 describe('Hysteria2 profile form',()=>{
  it('imports a link, displays Hysteria fields and saves the shared profile',async()=>{
   const saved=await importHysteria();

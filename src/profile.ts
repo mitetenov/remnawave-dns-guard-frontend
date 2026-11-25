@@ -1,7 +1,7 @@
-import type {HysteriaCongestion,ProbeProfile} from './types';
+import type {HysteriaCongestion,ProbeProfile,VlessFragment} from './types';
 import {parseALPN,validateALPN} from './alpn';
 import {parseXHTTPExtra,validateXHTTPExtra} from './xhttpExtra';
-const URI_PARAMETERS=new Set(['security','type','sni','serverName','pbk','sid','flow','fp','path','host','mode','encryption','extra','alpn']);
+const URI_PARAMETERS=new Set(['security','type','sni','serverName','pbk','sid','flow','fp','path','host','mode','encryption','extra','alpn','fm']);
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const blankProfile=():ProbeProfile=>({port:443,uuid:'',transport:'tcp',security:'reality',server_name:'',public_key:'',short_id:'',flow:'',fingerprint:'chrome',path:'/',host:'',xhttp_mode:'auto'});
 export function profileForProtocol(p:ProbeProfile,protocol:'vless'|'hysteria2'):ProbeProfile {
@@ -26,6 +26,7 @@ export function validateProfile(p:ProbeProfile):ProbeProfile {
  if(p.transport==='xhttp'&&!p.path.startsWith('/')) throw new Error('Путь XHTTP должен начинаться с /.');
  if(p.xhttp_extra!==undefined)validateXHTTPExtra(p.xhttp_extra,p.transport,p.xhttp_mode);
  if(p.alpn!==undefined)validateALPN(p.alpn,p.security);
+ if(p.vless_fragment!==undefined)validateVlessFragment(p.vless_fragment,p.transport);
  return p;
 }
 function validateHysteriaProfile(p:ProbeProfile):ProbeProfile {
@@ -37,7 +38,7 @@ function validateHysteriaProfile(p:ProbeProfile):ProbeProfile {
  if(p.pin_sha256&&!/^[a-f0-9]{64}$/i.test(p.pin_sha256))throw new Error('SHA-256 сертификата должен содержать 64 hex-символа.');
  if(p.hysteria_congestion!==undefined&&!isHysteriaCongestion(p.hysteria_congestion))throw new Error('Алгоритм QUIC: выберите BBR, Reno или Brutal.');
  if(p.alpn!==undefined){validateALPN(p.alpn,'tls');if(p.alpn.length&&(p.alpn.length!==1||p.alpn[0]!=='h3'))throw new Error('Hysteria2 поддерживает только ALPN h3.');}
- if(p.uuid||p.public_key||p.short_id||p.flow||p.host||p.xhttp_extra!==undefined||!['','chrome'].includes(p.fingerprint)||!['','/'].includes(p.path)||!['','auto'].includes(p.xhttp_mode))throw new Error('Уберите параметры VLESS / XHTTP из профиля Hysteria2.');
+ if(p.uuid||p.public_key||p.short_id||p.flow||p.host||p.xhttp_extra!==undefined||p.vless_fragment!==undefined||!['','chrome'].includes(p.fingerprint)||!['','/'].includes(p.path)||!['','auto'].includes(p.xhttp_mode))throw new Error('Уберите параметры VLESS / XHTTP из профиля Hysteria2.');
  return p;
 }
 export function parseProfileURI(value:string):ProbeProfile {
@@ -49,10 +50,44 @@ function isHysteriaCongestion(value:unknown):value is HysteriaCongestion {
 function isObject(value:unknown):value is Record<string,unknown> {
  return typeof value==='object'&&value!==null&&!Array.isArray(value);
 }
-function parseHysteriaCongestion(value:string):HysteriaCongestion|undefined {
- let finalmask:unknown;
+function parseFinalMask(value:string):unknown {
  if(value.length>4096)throw new Error('Параметр fm слишком большой.');
- try{finalmask=JSON.parse(value);}catch{throw new Error('Параметр fm должен содержать корректный JSON.');}
+ try{return JSON.parse(value);}catch{throw new Error('Параметр fm должен содержать корректный JSON.');}
+}
+function validFragmentRange(value:string,minimum:number):boolean {
+ const range=/^([0-9]{1,10})(?:-([0-9]{1,10}))?$/.exec(value);
+ if(!range)return false;
+ const low=Number(range[1]),high=Number(range[2]??range[1]);
+ return minimum<=low&&low<=high&&high<=0x7fffffff;
+}
+function validateVlessFragment(fragment:VlessFragment,transport:ProbeProfile['transport']):void {
+ if(transport!=='tcp')throw new Error('Фрагментация TLS ClientHello доступна для VLESS TCP / RAW.');
+ if(!isObject(fragment)||Object.keys(fragment).length!==3||fragment.packets!=='tlshello'){
+  throw new Error('В настройках фрагментации ожидаются packets: tlshello, length и delay.');
+ }
+ if(typeof fragment.length!=='string'||!validFragmentRange(fragment.length,1)){
+  throw new Error('Длина фрагмента должна быть положительным целым числом или диапазоном, например 10-20.');
+ }
+ if(typeof fragment.delay!=='string'||!validFragmentRange(fragment.delay,0)){
+  throw new Error('Задержка между фрагментами должна быть неотрицательным целым числом или диапазоном.');
+ }
+}
+function fragmentRangeText(value:unknown):string {
+ return typeof value==='string'||typeof value==='number'&&Number.isInteger(value)?String(value):'';
+}
+function parseVlessFragment(value:string):VlessFragment {
+ const finalmask=parseFinalMask(value);
+ if(!isObject(finalmask)||Object.keys(finalmask).length!==1||!Array.isArray(finalmask.tcp)||finalmask.tcp.length!==1){
+  throw new Error('В параметре fm для VLESS поддерживается одна TCP-маска fragment.');
+ }
+ const mask:unknown=finalmask.tcp[0];
+ if(!isObject(mask)||Object.keys(mask).length!==2||mask.type!=='fragment'||!isObject(mask.settings)||Object.keys(mask.settings).length!==3||mask.settings.packets!=='tlshello'){
+  throw new Error('В fm.tcp для VLESS ожидается fragment с параметрами packets: tlshello, length и delay.');
+ }
+ return {packets:mask.settings.packets,length:fragmentRangeText(mask.settings.length),delay:fragmentRangeText(mask.settings.delay)};
+}
+function parseHysteriaCongestion(value:string):HysteriaCongestion|undefined {
+ const finalmask=parseFinalMask(value);
  if(!isObject(finalmask)||Object.keys(finalmask).some(key=>key!=='quicParams'))throw new Error('В параметре fm поддерживаются только настройки quicParams.');
  if(!Object.hasOwn(finalmask,'quicParams'))return undefined;
  const quic=finalmask.quicParams;
@@ -110,6 +145,7 @@ export function parseVless(value:string):ProbeProfile {
  const profile:ProbeProfile={port:Number(uri.port),uuid:decodeURIComponent(uri.username),transport:transport==='xhttp'?'xhttp':'tcp',security:security as ProbeProfile['security'],server_name:q.get('sni')||q.get('serverName')||'',public_key:q.get('pbk')||'',short_id:q.get('sid')||'',flow:q.get('flow')||'',fingerprint:q.get('fp')||'chrome',path:q.get('path')||'/',host:q.get('host')||'',xhttp_mode:q.get('mode')||'auto'};
  if(!uri.hostname||!uri.port) throw new Error('В ссылке нужны адрес сервера и явный порт.');
  if(q.has('extra'))profile.xhttp_extra=parseXHTTPExtra(q.get('extra')!,profile.transport,profile.xhttp_mode);
+ if(q.has('fm'))profile.vless_fragment=parseVlessFragment(q.get('fm')!);
  const alpn=q.has('alpn')?parseALPN(q.get('alpn')!,profile.security):undefined;
  if(alpn)profile.alpn=alpn;
  return validateProfile(profile);
