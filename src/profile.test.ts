@@ -1,5 +1,6 @@
 import {describe,it,expect} from 'vitest';
 import {parseVless,validateProfile,blankProfile,isPublicIPv4} from './profile';
+import {subscriptionServers} from './subscription';
 const uuid='e764ae13-9e06-4e6d-a870-2898c984ca22';
 const pbk='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 describe('VLESS profile parser',()=>{
@@ -9,6 +10,34 @@ describe('VLESS profile parser',()=>{
  it.each(['https://example.com','vless://bad@1.1.1.1:443?security=tls&sni=example.com',`vless://${uuid}@1.1.1.1?security=tls&sni=example.com`,`vless://${uuid}@1.1.1.1:443?security=none`,`vless://${uuid}@1.1.1.1:443?security=reality&sni=example.com`,`vless://${uuid}@1.1.1.1:443?security=tls&sni=example.com&allowInsecure=1`,`vless://${uuid}@1.1.1.1:443?security=tls&sni=example.com&type=tcp&type=xhttp`])('rejects malformed or unsupported URI %s',value=>expect(()=>parseVless(value)).toThrow());
  it('rejects XHTTP with Vision flow and malformed short ID',()=>{expect(()=>validateProfile({...blankProfile(),uuid,server_name:'example.com',public_key:pbk,transport:'xhttp',flow:'xtls-rprx-vision'})).toThrow('не поддерживает flow');expect(()=>validateProfile({...blankProfile(),uuid,server_name:'example.com',public_key:pbk,short_id:'abc'})).toThrow('Short ID');});
  it('requires TLS SNI and preserves explicit port',()=>{expect(()=>parseVless(`vless://${uuid}@1.1.1.1:443?security=tls`)).toThrow('SNI');expect(parseVless(`vless://${uuid}@1.1.1.1:12345?security=tls&sni=example.com`).port).toBe(12345);});
+});
+describe('VLESS FinalMask fragmentation',()=>{
+ const base=`vless://${uuid}@node.example.com:443?type=raw&security=reality&sni=edge.example.com&pbk=${pbk}&flow=xtls-rprx-vision`;
+ const fragment={packets:'tlshello',length:'10-20',delay:'0'};
+ const finalmask=(settings:unknown)=>({tcp:[{type:'fragment',settings}]});
+ const encode=(mask:unknown)=>encodeURIComponent(JSON.stringify(mask));
+
+ it('imports ClientHello fragmentation from a subscription and normalizes JSON integers',()=>{
+  const uri=`${base}&fm=${encode(finalmask({...fragment,delay:0}))}#Node`;
+  const [server]=subscriptionServers([uri]);
+  expect(server.error).toBe('');
+  expect(server.profile?.vless_fragment).toEqual(fragment);
+ });
+ it.each([
+  {tcp:[{type:'filter',settings:fragment}]}, {tcp:[],udp:[]},
+  {tcp:[{type:'fragment',settings:fragment},{type:'fragment',settings:fragment}]},
+  finalmask({...fragment,packets:'1-3'}),finalmask({...fragment,maxSplit:'2'}),
+  finalmask({...fragment,length:'0-10'}),finalmask({...fragment,length:'20-10'}),
+  finalmask({...fragment,delay:'-1'}),finalmask({...fragment,delay:2147483648}),
+ ])('rejects unsupported or malformed FinalMask settings %#',mask=>{
+  expect(()=>parseVless(`${base}&fm=${encode(mask)}`)).toThrow();
+ });
+ it('rejects the TCP mask on XHTTP and duplicate fm values',()=>{
+  const fm=encode(finalmask(fragment));
+  const xhttp=base.replace('type=raw','type=xhttp').replace('&flow=xtls-rprx-vision','');
+  expect(()=>parseVless(`${xhttp}&fm=${fm}`)).toThrow('VLESS TCP / RAW');
+  expect(()=>parseVless(`${base}&fm=${fm}&fm=${fm}`)).toThrow('несколько раз');
+ });
 });
 describe('public IPv4 input',()=>{
  it.each(['1.1.1.1','8.8.8.8','93.184.216.34','192.2.10.20','192.0.100.1','192.0.1.1','192.0.3.1','192.0.0.9','192.0.0.10'])('accepts %s',ip=>expect(isPublicIPv4(ip)).toBe(true));

@@ -21,6 +21,7 @@ const fieldLabels:Readonly<Record<string,string>>={
  path:'Путь XHTTP',
  host:'Host XHTTP',
  xhttp_mode:'Режим XHTTP',
+ vless_fragment:'Фрагментация TLS ClientHello',
  hysteria_congestion:'Алгоритм QUIC',
  username:'Имя пользователя',
  password:'Пароль',
